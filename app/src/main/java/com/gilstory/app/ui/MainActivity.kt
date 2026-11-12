@@ -80,6 +80,8 @@ class MainActivity : Activity() {
     }
     private fun startWithAudio() {
         if (session.view().running) return
+        parkingSpot = null
+        parkingStep = null
         val result = audioManager.requestAudioFocus(focusRequest)
         Log.i(TAG, "오디오 포커스 요청 결과: $result")
         if (result == android.media.AudioManager.AUDIOFOCUS_REQUEST_FAILED) {
@@ -101,6 +103,10 @@ class MainActivity : Activity() {
     private var lastTickMs = 0L
     private var demoMinutes = 0
     private var extraMinutes = 0
+    // 주차 결과·시연 진행을 화면 가운데에 크게 보여 줍니다 (이야기가 다시 시작되거나 시간이 지나면 사라짐)
+    private var parkingSpot: ParkingSpot? = null
+    private var parkingStep: String? = null
+    private var parkingShownAtMs = 0L
     private val env = linkedMapOf("차량" to "…", "내비" to "…", "음성 합성" to "…", "음성 인식" to "…", "빌트인캠" to "…")
     private val log = ArrayDeque<String>()
 
@@ -112,6 +118,10 @@ class MainActivity : Activity() {
     private val ticker = object : Runnable {
         override fun run() {
             countOwnDrivingTime()
+            if (parkingSpot != null && SystemClock.elapsedRealtime() - parkingShownAtMs > PARKING_SHOW_MS) {
+                parkingSpot = null
+                render(session.view())
+            }
             session.onTick()
             updateNight()
             main.postDelayed(this, TICK_MS)
@@ -151,7 +161,11 @@ class MainActivity : Activity() {
         navigator = SwitchingNavigator(demo, pleosNavigator)
         session = newSession(demoTiming = false)
         parkingLocator = ParkingLocator(NoSignCamera, parkingNotifier) { SystemClock.elapsedRealtime() }
-        parkingDemo = ParkingDemo(main, parkingNotifier, ::addLog)
+        parkingDemo = ParkingDemo(main, demoParkingNotifier) { step ->
+            addLog(step)
+            parkingStep = step.replace("[시연] ", "")
+            render(session.view())
+        }
         setEnv("빌트인캠", if (NoSignCamera.available) "연결됨" else "영상 API 없음 (시연만)")
 
         setParked(false, known = false)
@@ -248,9 +262,36 @@ class MainActivity : Activity() {
 
     // 휴대폰으로 보내는 경로(마이현대 연동 또는 동반 앱)가 정해지면 이 자리에서 전송합니다
     private val parkingNotifier = object : ParkingNotifier {
-        override fun notify(spot: ParkingSpot) {
-            Log.i(TAG, "주차 위치: ${spot.summary()}")
-            addLog("📲 주차 위치 알림: ${spot.summary()}")
+        override fun notify(spot: ParkingSpot) = showParking(spot, demo = false)
+    }
+
+    private val demoParkingNotifier = object : ParkingNotifier {
+        override fun notify(spot: ParkingSpot) = showParking(spot, demo = true)
+    }
+
+    /** 주차 위치를 화면 가운데에 크게 띄우고 소리로도 알려 줍니다. */
+    private fun showParking(spot: ParkingSpot, demo: Boolean) {
+        Log.i(TAG, "주차 위치: ${spot.summary()}")
+        addLog("📲 주차 위치 알림: ${spot.summary()}")
+        // 시연에서는 듣던 이야기를 멈추고 주차 안내를 들려줍니다. 실제 주차 중 이야기는 끊지 않습니다.
+        if (demo && session.view().running) session.stop()
+        parkingStep = null
+        parkingSpot = spot
+        parkingShownAtMs = SystemClock.elapsedRealtime()
+        render(session.view())
+        if (session.view().running) return
+        val line = if (spot.floor == null && spot.pillar == null) {
+            "기둥 글자를 읽지 못했어요. 주차 사진으로 확인해 주세요."
+        } else {
+            // "C-17"을 "마이너스"로 읽지 않도록 소리 내는 문장은 따로 만듭니다
+            val floor = spot.floor?.let { "지하 ${it.drop(1)}층" }
+            val pillar = spot.pillar?.let { "${it.substringBefore('-')} ${it.substringAfter('-').trimStart('0')}번 기둥 옆" }
+            "주차 위치를 기억해 둘게요. ${listOfNotNull(floor, pillar).joinToString(", ")}이에요."
+        }
+        val granted = audioManager.requestAudioFocus(focusRequest) != android.media.AudioManager.AUDIOFOCUS_REQUEST_FAILED
+        if (!granted) return
+        speaker.speak(line) {
+            if (!session.view().running && !focusRequested) audioManager.abandonAudioFocusRequest(focusRequest)
         }
     }
 
@@ -490,6 +531,19 @@ class MainActivity : Activity() {
             it.alpha = if (touch) 1f else 0.55f
         }
         if (v.awaitingAnswer && !touch) statusText.text = "🎤 말로 대답해 주세요 (\"1번\", \"2번\", \"네\", \"그만\")"
+
+        // 주차 시연 진행·결과는 이야기보다 앞에 보여 줍니다
+        val spot = parkingSpot
+        val step = parkingStep
+        if (spot != null) {
+            genreEmoji.text = "🅿"
+            titleText.text = spot.summary()
+            statusText.text = if (spot.complete) "주차 위치를 기억했어요 · 휴대폰 알림 예정" else "주차 위치를 확인해 주세요"
+        } else if (step != null) {
+            genreEmoji.text = "⏪"
+            titleText.text = "후진 주차 중"
+            statusText.text = step
+        }
     }
 
     private fun setEnv(key: String, value: String) {
@@ -505,6 +559,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val TICK_MS = 2_000L
+        private const val PARKING_SHOW_MS = 60_000L
         private const val TAG = "Gilstory"
     }
 }
