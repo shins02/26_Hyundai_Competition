@@ -21,11 +21,15 @@ import com.gilstory.app.core.Genre
 import com.gilstory.app.core.ParkingLocator
 import com.gilstory.app.core.ParkingNotifier
 import com.gilstory.app.core.ParkingSpot
+import com.gilstory.app.core.RestNavigator
+import com.gilstory.app.core.RestStop
 import com.gilstory.app.core.RestStoryMode
 import com.gilstory.app.core.SessionView
 import com.gilstory.app.core.Stage
 import com.gilstory.app.core.StoryPlanner
 import com.gilstory.app.core.StorySession
+import com.gilstory.app.platform.GeoPoint
+import com.gilstory.app.platform.MapData
 import com.gilstory.app.platform.NaturalSpeaker
 import com.gilstory.app.platform.StoryRepository
 import com.gilstory.app.platform.demo.DemoDrive
@@ -107,6 +111,9 @@ class MainActivity : Activity() {
     private var parkingSpot: ParkingSpot? = null
     private var parkingStep: String? = null
     private var parkingShownAtMs = 0L
+    // 시연 버튼·음성 인식 결과를 이야기 띠에 잠깐 보여 줍니다
+    private var notice: String? = null
+    private var noticeAtMs = 0L
     private val env = linkedMapOf("차량" to "…", "내비" to "…", "음성 합성" to "…", "음성 인식" to "…", "빌트인캠" to "…")
     private val log = ArrayDeque<String>()
 
@@ -118,6 +125,10 @@ class MainActivity : Activity() {
     private val ticker = object : Runnable {
         override fun run() {
             countOwnDrivingTime()
+            if (notice != null && SystemClock.elapsedRealtime() - noticeAtMs > NOTICE_MS) {
+                notice = null
+                render(session.view())
+            }
             if (parkingSpot != null && SystemClock.elapsedRealtime() - parkingShownAtMs > PARKING_SHOW_MS) {
                 parkingSpot = null
                 render(session.view())
@@ -144,6 +155,37 @@ class MainActivity : Activity() {
     private lateinit var envText: TextView
     private lateinit var logText: TextView
     private lateinit var demoDriveButton: Button
+    private lateinit var routeMap: RouteMapView
+
+    // ---- 지도 ----
+    private var demoPath: List<GeoPoint> = emptyList()
+    private var demoLegTargets: List<Double> = emptyList() // 시연 구간 i가 시작하는 경로 위 위치
+    private var demoLeg = -1
+    private var demoLegStartMs = 0L
+    private var pausedAtMs = 0L
+    private var addedRest: String? = null
+    private var mapOverride: RouteMapView.Mode? = null // 지도를 눌러 바꾼 화면
+    private var realRemain: Pair<Int, Int>? = null     // 실제 내비: 남은 거리(m), 시간(초)
+    private var realTurn: Triple<String, Double, String>? = null
+    private var lastRegion: String? = null
+    private val mapTicker = object : Runnable {
+        override fun run() {
+            if (demo.isRunning && demoLeg >= 0 && demoLegTargets.isNotEmpty()) {
+                // 경유지로 넣은 쉼터가 있으면 그 앞에서 멈춥니다 (도착하면 쉼터로 들어감)
+                val legEnd = demoLegTargets.getOrElse(demoLeg + 1) { (demoPath.size - 1).toDouble() }
+                val restAt = addedRest?.let { routeMap.pathPositionOf(it) }?.takeIf { it > routeMap.plannedPosition }
+                val to = if (restAt != null) minOf(legEnd, restAt) else legEnd
+                val now = SystemClock.elapsedRealtime()
+                val left = (demoLegStartMs + demo.legDurationMs - now).coerceAtLeast(500L)
+                val pos = routeMap.plannedPosition
+                // 쉼터에 들어가 있는 동안에는 차를 멈추고, 다시 출발하면 그 자리에서 이어서 갑니다.
+                // 남은 시간 안에 이번 구간 끝에 닿도록 조금씩 나아갑니다.
+                if (!parked && to > pos) routeMap.moveAlongPlanned(pos + (to - pos) * (500.0 / left).coerceAtMost(1.0))
+                updateMap(session.view())
+                main.postDelayed(this, 500)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -159,6 +201,7 @@ class MainActivity : Activity() {
         demo = DemoDrive(main, demoSink)
         pleosNavigator = PleosNavigator(this, main, StoryRepository.loadRestStops(this), naviSink)
         navigator = SwitchingNavigator(demo, pleosNavigator)
+        setUpMap()
         session = newSession(demoTiming = false)
         parkingLocator = ParkingLocator(NoSignCamera, parkingNotifier) { SystemClock.elapsedRealtime() }
         parkingDemo = ParkingDemo(main, demoParkingNotifier) { step ->
@@ -201,7 +244,11 @@ class MainActivity : Activity() {
             setEnv("음성 합성", if (ok) "Pleos ✓" else "기본 TTS")
         }
 
-        pleosListener = PleosAnswerListener(this, main)
+        pleosListener = PleosAnswerListener(
+            this, main,
+            onHeard = { heard -> addLog(heard); showNotice(heard) },
+            onListening = { showNotice("🎤 듣고 있어요 · 지금 말씀하세요") },
+        )
         pleosListener.start { ok ->
             if (ok) listener.switchTo(pleosListener)
             setEnv("음성 인식", if (ok) "Pleos ✓ (주행 중 음성 대답)" else "없음 (주행 중 질문 생략)")
@@ -303,11 +350,27 @@ class MainActivity : Activity() {
         override fun onWaypointArrived() { if (!demo.isRunning) session.onWaypointArrived() }
 
         override fun onNaviError(message: String) = addLog("⚠ 내비: $message")
+
+        override fun onPosition(latitude: Double, longitude: Double, heading: Double) {
+            if (!demo.isRunning) routeMap.updatePosition(GeoPoint(latitude, longitude), heading)
+        }
+
+        override fun onRemaining(metres: Int, seconds: Int) { realRemain = metres to seconds }
+
+        override fun onNextTurn(type: String, metres: Double, description: String) { realTurn = Triple(type, metres, description) }
+
+        override fun onRoute(destination: Pair<Double, Double>?, waypoints: List<Pair<Double, Double>>) {
+            if (destination == null) { realRemain = null; realTurn = null }
+            if (!demo.isRunning) routeMap.updateRoute(destination?.let { GeoPoint(it.first, it.second) }, waypoints.map { GeoPoint(it.first, it.second) })
+        }
     }
 
     private val demoSink = object : DemoDrive.Sink {
         override fun onDemoRegion(region: String) {
             addLog("📍 $region 진입")
+            demoLeg = (demoLeg + 1).coerceAtMost(demoLegTargets.size - 1)
+            demoLegStartMs = SystemClock.elapsedRealtime()
+            lastRegion = region
             session.onRegionChanged(region)
         }
 
@@ -320,14 +383,129 @@ class MainActivity : Activity() {
 
         override fun onDemoArrived() {
             addLog("🅿 쉼터 도착 (시연)")
+            addedRest?.let { routeMap.pathPositionOf(it) }?.let { routeMap.moveAlongPlanned(it) }
             setParked(true)
             session.onWaypointArrived()
         }
 
         override fun onDemoFinished() {
             addLog("🏁 데모 주행 끝")
+            routeMap.moveAlongPlanned((demoPath.size - 1).toDouble())
             demoDriveButton.text = "🚗 데모 주행 (영동고속도로)"
         }
+    }
+
+    // ---- 지도 ----
+
+    /** 경유지로 넣은 쉼터를 지도에 초록으로 표시하려고 결과만 엿봅니다. */
+    private val mapAwareNavigator = object : RestNavigator {
+        // 시연 주행: 지도에서 차 앞쪽의 가장 가까운 쉼터와 실제 남은 거리를 씁니다
+        override fun nextRestStop(): RestStop? =
+            if (demo.isRunning) routeMap.nextPinAhead()?.let { (pin, km) -> RestStop(pin.name, "휴게소", km) } ?: navigator.nextRestStop()
+            else navigator.nextRestStop()
+        override fun followExisting(stop: RestStop) = navigator.followExisting(stop)
+        override fun addWaypoint(stop: RestStop, onResult: (Boolean) -> Unit) = navigator.addWaypoint(stop) { ok ->
+            if (ok) addedRest = stop.name
+            onResult(ok)
+            render(session.view())
+        }
+    }
+
+    private fun setUpMap() {
+        runCatching {
+            routeMap.baseMap = MapData.loadBaseMap(this)
+            routeMap.roads = MapData.loadRoads(this)
+            val route = MapData.loadDemoRoute(this)
+            demoPath = route.path
+            demoLegTargets = legTargets(demo.regions, route.regionAt, route.path)
+        }.onFailure { Log.w(TAG, "지도 자료를 읽지 못함", it) }
+        routeMap.setRestPins(StoryRepository.loadRestStops(this).mapNotNull { p ->
+            if (p.latitude != null && p.longitude != null) RouteMapView.Pin(p.name, GeoPoint(p.latitude, p.longitude)) else null
+        })
+        routeMap.setOnClickListener {
+            mapOverride = if (routeMap.mode == RouteMapView.Mode.NAV) RouteMapView.Mode.OVERVIEW else RouteMapView.Mode.NAV
+            updateMap(session.view())
+        }
+        routeMap.title = "📍 위치 확인 중"
+        routeMap.caption = "길 안내를 시작하면 경유지·목적지가 함께 보여요"
+    }
+
+    /** 시연 구간마다 경로 위 위치. 같은 시·군이 이어지면 다음 시·군까지 나눠서 갑니다. */
+    private fun legTargets(regions: List<String>, regionAt: List<Pair<String, GeoPoint>>, path: List<GeoPoint>): List<Double> {
+        fun nearest(p: GeoPoint) = path.indices.minByOrNull { (path[it].lat - p.lat).let { d -> d * d } + (path[it].lon - p.lon).let { d -> d * d } }?.toDouble() ?: 0.0
+        val base = regions.map { r -> regionAt.firstOrNull { it.first == r }?.second?.let(::nearest) ?: 0.0 }
+        val result = base.toMutableList()
+        var i = 0
+        while (i < regions.size) {
+            var j = i
+            while (j + 1 < regions.size && regions[j + 1] == regions[i]) j++
+            val next = base.getOrElse(j + 1) { (path.size - 1).toDouble() }
+            for (k in i..j) result[k] = base[i] + (next - base[i]) * (k - i) / (j - i + 1)
+            i = j + 1
+        }
+        return result
+    }
+
+    private fun updateMap(v: SessionView) {
+        val rest = v.restStopName
+        if (rest == null) addedRest = null
+        routeMap.setRestHighlight(rest, if (rest != null && rest == addedRest) RouteMapView.RestState.ADDED else RouteMapView.RestState.OFFERED)
+        val region = v.region ?: lastRegion
+        routeMap.title = when {
+            demo.isRunning -> "🚗 영동고속도로 강릉 방향 · ${region ?: "출발"}"
+            region != null -> "📍 $region"
+            else -> "📍 위치 확인 중"
+        }
+        val next = runCatching { mapAwareNavigator.nextRestStop() }.getOrNull()
+        routeMap.caption = when {
+            rest != null && rest == addedRest -> "🅿 경유지 추가: $rest"
+            rest != null -> "🅿 쉼터 안내: $rest"
+            next != null -> "다음 쉼터 · ${next.name} ${"%.1f".format(next.distanceKm)}km"
+            demo.isRunning -> "시연 주행 중 (경로는 대략 위치)"
+            else -> "길 안내를 시작하면 경유지·목적지가 함께 보여요"
+        }
+
+        // 주행 화면(네비 모드): 달리는 중이면 기본으로 켭니다. 지도를 누르면 전체 경로와 바꿉니다
+        val driving = !parked && (demo.isRunning || routeMap.hasRoute)
+        routeMap.mode = mapOverride ?: if (driving) RouteMapView.Mode.NAV else RouteMapView.Mode.OVERVIEW
+
+        // 위쪽 안내 띠
+        val turn = realTurn
+        routeMap.banner = when {
+            rest != null && rest == addedRest -> RouteMapView.Banner("P", "경유지 · $rest", next?.takeIf { it.name == rest }?.let { km(it.distanceKm) } ?: "경유")
+            rest != null -> RouteMapView.Banner("P", "쉬어 갈 곳 · $rest", next?.takeIf { it.name == rest }?.let { km(it.distanceKm) } ?: "앞쪽")
+            !demo.isRunning && turn != null -> RouteMapView.Banner(turnIcon(turn.first), turn.third.ifBlank { "길 안내" }, km(turn.second / 1000.0))
+            next != null -> RouteMapView.Banner("P", "다음 쉼터 · ${next.name}", km(next.distanceKm))
+            else -> RouteMapView.Banner("↑", if (demo.isRunning) "영동고속도로 따라 직진" else "길 안내 대기", "")
+        }
+        routeMap.roadName = if (demo.isRunning) "영동고속도로" else ""
+
+        // 아래 띠: 남은 거리 · 도착 예정
+        val remain = when {
+            demo.isRunning -> routeMap.remainingPlannedKm().let { it to it / DEMO_KMH * 60 }
+            else -> realRemain?.let { (m, sec) -> m / 1000.0 to sec / 60.0 }
+        }
+        if (remain != null) {
+            val eta = Calendar.getInstance().apply { add(Calendar.MINUTE, remain.second.toInt()) }
+            routeMap.bottomLeft = "남은 거리 ${km(remain.first)}"
+            routeMap.bottomRight = "도착 예정 %s %d:%02d · %d분".format(
+                if (eta.get(Calendar.AM_PM) == Calendar.AM) "오전" else "오후",
+                (eta.get(Calendar.HOUR) + 11) % 12 + 1, eta.get(Calendar.MINUTE), remain.second.toInt(),
+            )
+        } else {
+            routeMap.bottomLeft = ""
+            routeMap.bottomRight = ""
+        }
+    }
+
+    private fun km(value: Double) = if (value < 1) "${(value * 1000).toInt()}m" else "%.1fkm".format(value)
+
+    private fun turnIcon(type: String) = when {
+        "SERVICEAREA" in type || "RESTAREA" in type -> "P"
+        "UTURN" in type -> "⤺"
+        "LEFT" in type -> "↰"
+        "RIGHT" in type -> "↱"
+        else -> "↑"
     }
 
     // ---- 세션 ----
@@ -339,7 +517,7 @@ class MainActivity : Activity() {
         } else {
             StorySession.Timing()
         }
-        return StorySession(planner, speaker, listener, navigator, clock, timing = timing, onUpdate = ::render).also {
+        return StorySession(planner, speaker, listener, mapAwareNavigator, clock, timing = timing, onUpdate = ::render).also {
             it.setPreferredGenres(selectedGenres())
             it.setFamilyMode(findViewById<Switch>(R.id.familyMode).isChecked)
             it.setRestStoryMode(restStoryMode())
@@ -409,6 +587,7 @@ class MainActivity : Activity() {
         envText = findViewById(R.id.envText)
         logText = findViewById(R.id.logText)
         demoDriveButton = findViewById(R.id.demoDrive)
+        routeMap = findViewById(R.id.routeMap)
     }
 
     private fun wireButtons() {
@@ -448,7 +627,14 @@ class MainActivity : Activity() {
             extraMinutes = 0
             session = newSession(demoTiming = true)
             setParked(false)
+            demoLeg = -1
+            addedRest = null
+            mapOverride = null
+            routeMap.showPlannedRoute(demoPath)
+            routeMap.moveAlongPlanned(0.0)
             demo.start()
+            main.removeCallbacks(mapTicker)
+            main.postDelayed(mapTicker, 500)
             startWithAudio()
             demoDriveButton.text = "■ 데모 주행 멈추기"
             addLog("🚗 데모 주행 시작: 영동고속도로 서울 → 강릉")
@@ -456,34 +642,43 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.demoParking).setOnClickListener { parkingDemo.start() }
         findViewById<Button>(R.id.demoMinutes).setOnClickListener {
             extraMinutes += 30
-            addLog("⏱ 운전 시간 +30분 (총 ${totalMinutes()}분)")
+            demoStep("⏱ 운전 시간 +30분 (총 ${totalMinutes()}분)")
             pushMinutes()
         }
         findViewById<Button>(R.id.demoNight).setOnClickListener {
             demoNight = !demoNight
-            addLog(if (demoNight) "🌙 밤으로 전환" else "☀ 낮으로 전환")
+            demoStep(if (demoNight) "🌙 밤으로 전환" else "☀ 낮으로 전환")
             updateNight()
         }
         findViewById<Button>(R.id.demoRear).setOnClickListener {
             rearOccupied = !rearOccupied
-            addLog(if (rearOccupied) "👥 뒷좌석 탑승" else "👤 뒷좌석 비움")
+            demoStep(if (rearOccupied) "👥 뒷좌석 탑승" else "👤 뒷좌석 비움")
             session.onRearOccupied(rearOccupied)
         }
         findViewById<Button>(R.id.demoAttention).setOnClickListener {
             attentionOn = !attentionOn
-            addLog(if (attentionOn) "☕ 차량 졸음 경고 켜짐 (테스트 주입)" else "☕ 차량 졸음 경고 꺼짐")
+            val hint = if (attentionOn && !session.view().running) " · ▶ 시작하면 쉼터를 안내해요" else ""
+            demoStep((if (attentionOn) "☕ 차량 졸음 경고 켜짐 (시연)" else "☕ 차량 졸음 경고 꺼짐") + hint)
             session.onDriverAttention(attentionOn)
         }
         findViewById<Button>(R.id.demoArrive).setOnClickListener {
-            if (!demo.isRunning) return@setOnClickListener
+            if (parked) { demoStep("🅿 이미 정차 중이에요"); return@setOnClickListener }
+            demoStep("🅿 쉼터 도착 · P단 (시연)")
+            pausedAtMs = SystemClock.elapsedRealtime()
             setParked(true)
             session.onWaypointArrived()
         }
         findViewById<Button>(R.id.demoResume).setOnClickListener {
-            if (!demo.isRunning) return@setOnClickListener
+            if (!parked) { demoStep("🚗 이미 달리는 중이에요 · 정차하려면 🅿 쉼터 도착"); return@setOnClickListener }
+            demoStep("🚗 다시 출발 · D단 (시연)")
             attentionOn = false
             session.onDriverAttention(false)
+            // 시연 주행: 쉬는 동안 멈췄던 차가 그 자리에서 이어서 달립니다
+            if (pausedAtMs > 0) demoLegStartMs += SystemClock.elapsedRealtime() - pausedAtMs
+            pausedAtMs = 0L
+            mapOverride = null
             setParked(false)
+            if (demo.isRunning) { main.removeCallbacks(mapTicker); main.post(mapTicker) }
         }
     }
 
@@ -509,6 +704,7 @@ class MainActivity : Activity() {
             v.stage == Stage.WAKE -> "🟠 깨우기" to R.color.stage_wake
             else -> "🔴 쉼터 안내" to R.color.stage_rest
         }
+        if (::routeMap.isInitialized && ::navigator.isInitialized) updateMap(v)
         stagePill.text = label
         stagePill.background.mutate().setTint(getColor(color))
         regionText.text = "📍 ${v.region ?: "위치 확인 중"}"
@@ -532,6 +728,8 @@ class MainActivity : Activity() {
         }
         if (v.awaitingAnswer && !touch) statusText.text = "🎤 말로 대답해 주세요 (\"1번\", \"2번\", \"네\", \"그만\")"
 
+        notice?.let { statusText.text = it }
+
         // 주차 시연 진행·결과는 이야기보다 앞에 보여 줍니다
         val spot = parkingSpot
         val step = parkingStep
@@ -551,6 +749,18 @@ class MainActivity : Activity() {
         envText.text = env.entries.joinToString("\n") { "${it.key}: ${it.value}" }
     }
 
+    /** 시연 버튼을 누른 결과를 기록하고 이야기 띠에도 잠깐 보여 줍니다. */
+    private fun demoStep(text: String) {
+        addLog(text)
+        showNotice(text)
+    }
+
+    private fun showNotice(text: String) {
+        notice = text
+        noticeAtMs = SystemClock.elapsedRealtime()
+        render(session.view())
+    }
+
     private fun addLog(line: String) {
         log.addFirst(line)
         while (log.size > 8) log.removeLast()
@@ -560,6 +770,8 @@ class MainActivity : Activity() {
     companion object {
         private const val TICK_MS = 2_000L
         private const val PARKING_SHOW_MS = 60_000L
+        private const val NOTICE_MS = 5_000L
+        private const val DEMO_KMH = 95.0 // 시연 남은 시간 계산용 평균 속도
         private const val TAG = "Gilstory"
     }
 }

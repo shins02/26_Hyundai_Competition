@@ -39,7 +39,18 @@ class PleosNavigator(
         fun onRegion(region: String)
         fun onWaypointArrived()
         fun onNaviError(message: String)
+        /** 지도용: 현재 위치(위도, 경도, 진행 방향) */
+        fun onPosition(latitude: Double, longitude: Double, heading: Double) = Unit
+        /** 지도용: 목적지와 경유지 좌표 (길 안내 중이 아니면 목적지 null) */
+        fun onRoute(destination: Pair<Double, Double>?, waypoints: List<Pair<Double, Double>>) = Unit
+        /** 지도용: 목적지까지 남은 거리(m)와 시간(초로 가정) */
+        fun onRemaining(metres: Int, seconds: Int) = Unit
+        /** 지도용: 다음 길 안내 (회전 종류 이름, 남은 거리 m, 설명) */
+        fun onNextTurn(type: String, metres: Double, description: String) = Unit
     }
+
+    private var destination: Pair<Double, Double>? = null
+    private var waypointPoints: List<Pair<Double, Double>> = emptyList()
 
     private val navi = NaviHelper(context)
     private var ready = false
@@ -59,6 +70,7 @@ class PleosNavigator(
         completion = null
         done?.invoke(ok)
     }
+    private fun clearRoute() { destination = null; waypointPoints = emptyList(); sink.onRoute(null, emptyList()) }
     private fun clearGuidance() { ahead = emptyList(); guidanceAt = 0L }
 
     private val listener = object : NaviHelperEventListener {
@@ -66,6 +78,9 @@ class PleosNavigator(
             main.post {
                 if (currentLocationInfo.routeId != routeId) clearGuidance()
                 routeId = currentLocationInfo.routeId
+                if (currentLocationInfo.latitude != 0.0 || currentLocationInfo.longitude != 0.0) {
+                    sink.onPosition(currentLocationInfo.latitude, currentLocationInfo.longitude, currentLocationInfo.heading)
+                }
                 RegionParser.regionOf(currentLocationInfo.address)?.let(sink::onRegion)
             }
         }
@@ -75,18 +90,30 @@ class PleosNavigator(
                 ahead = tBTInfo.filter { it.type == TurnType.TURN_ENTER_SERVICEAREA || it.type == TurnType.TURN_RESTAREA }
                     .map { AheadRest(it.description, it.distance) }
                 guidanceAt = SystemClock.elapsedRealtime()
+                tBTInfo.firstOrNull()?.let { sink.onNextTurn(it.type.name, it.distance, it.description) }
             }
         }
         override fun onRouteStarted(routeStartInfo: ai.pleos.playground.navi.data.RouteStartInfo) { main.post { clearGuidance() } }
         override fun onReRouteEnded() { main.post { clearGuidance() } }
-        override fun onRouteCancelled() { main.post { clearGuidance(); confirmed = null; resolve(false) } }
-        override fun onRouteEnded() { main.post { clearGuidance(); resolve(false) } }
+        override fun onRouteCancelled() { main.post { clearGuidance(); confirmed = null; resolve(false); clearRoute() } }
+        override fun onRouteEnded() { main.post { clearGuidance(); resolve(false); clearRoute() } }
 
         override fun onWaypointChanged(waypointChangedInfo: WaypointChangedInfo) {
             main.post { if (pending != null || confirmed != null) runCatching { navi.getWaypointInfo() } }
         }
+        override fun onDestinationInfo(destinationInfo: ai.pleos.playground.navi.data.DestinationInfo) {
+            main.post {
+                destination = (destinationInfo.displayLatitude ?: destinationInfo.latitude) to (destinationInfo.displayLongitude ?: destinationInfo.longitude)
+                destination = destination?.takeIf { it.first != 0.0 || it.second != 0.0 }
+                if (destination != null) sink.onRemaining(destinationInfo.remainDistance, destinationInfo.remainTime)
+                sink.onRoute(destination, waypointPoints)
+            }
+        }
+
         override fun onWayPointInfo(waypointInfo: List<WaypointInfo>) {
             main.post {
+                waypointPoints = waypointInfo.map { (it.displayLatitude ?: it.latitude) to (it.displayLongitude ?: it.longitude) }
+                sink.onRoute(destination, waypointPoints)
                 val target = pending ?: return@post
                 if (waypointInfo.any { abs(it.latitude - target.latitude!!) < 0.0003 && abs(it.longitude - target.longitude!!) < 0.0003 }) {
                     resolve(true)
@@ -114,7 +141,9 @@ class PleosNavigator(
             if (!ready) return
             runCatching { navi.getCurrentLocationInfo() }
             runCatching { navi.getTBTInfo() }
-            if (pending != null) runCatching { navi.getWaypointInfo() }
+            // 지도에 목적지·경유지를 그리기 위해 함께 묻습니다
+            runCatching { navi.getDestinationInfo() }
+            runCatching { navi.getWaypointInfo() }
             main.postDelayed(this, POLL_MS)
         }
     }

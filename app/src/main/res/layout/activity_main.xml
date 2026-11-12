@@ -52,46 +52,62 @@
                 android:textSize="22sp" />
         </LinearLayout>
 
-        <!-- 가운데: 장르 아이콘 + 한 줄 상태 -->
-        <LinearLayout
+        <!-- 가운데: 위쪽 넓은 경로 지도 -->
+        <com.gilstory.app.ui.RouteMapView
+            android:id="@+id/routeMap"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_marginTop="20dp"
-            android:layout_weight="1"
+            android:layout_marginTop="16dp"
+            android:layout_weight="1" />
+
+        <!-- 지도 아래 이야기 띠: 장르 아이콘 + 제목 + 상태 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
             android:background="@drawable/card"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:padding="24dp">
+            android:gravity="center_vertical"
+            android:minHeight="112dp"
+            android:orientation="horizontal"
+            android:paddingHorizontal="24dp"
+            android:paddingVertical="14dp">
 
             <TextView
                 android:id="@+id/genreEmoji"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="😂"
-                android:textSize="72sp" />
+                android:textSize="52sp" />
 
-            <TextView
-                android:id="@+id/titleText"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:text="S J Story"
-                android:textColor="@color/text"
-                android:textSize="34sp"
-                android:textStyle="bold" />
+                android:layout_marginStart="20dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/statusText"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:text="시작을 누르면 이야기를 들려드려요"
-                android:textColor="@color/text_dim"
-                android:textSize="24sp" />
+                <TextView
+                    android:id="@+id/titleText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="S J Story"
+                    android:textColor="@color/text"
+                    android:textSize="30sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/statusText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="시작을 누르면 이야기를 들려드려요"
+                    android:textColor="@color/text_dim"
+                    android:textSize="22sp" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- 대답 버튼: 질문을 기다릴 때만 보입니다 -->
@@ -194,8 +210,27 @@
             android:padding="20dp">
 
             <TextView
+                style="@style/PanelTitle"
+                android:text="시연 패널" />
+
+            <TextView
+                android:id="@+id/envText"
+                style="@style/PanelLabel"
+                android:text="연동 상태 확인 중" />
+
+            <Button android:id="@+id/demoDrive" style="@style/PanelButton" android:text="🚗 데모 주행 (영동고속도로)" />
+            <Button android:id="@+id/demoParking" style="@style/PanelButton" android:text="⏪ 후진 주차 시연" />
+            <Button android:id="@+id/demoMinutes" style="@style/PanelButton" android:text="⏱ 운전 시간 +30분" />
+            <Button android:id="@+id/demoNight" style="@style/PanelButton" android:text="🌙 밤 / 낮 전환" />
+            <Button android:id="@+id/demoRear" style="@style/PanelButton" android:text="👥 뒷좌석 탑승 전환" />
+            <Button android:id="@+id/demoAttention" style="@style/PanelButton" android:text="☕ 차량 졸음 경고 켜기/끄기" />
+            <Button android:id="@+id/demoArrive" style="@style/PanelButton" android:text="🅿 쉼터 도착" />
+            <Button android:id="@+id/demoResume" style="@style/PanelButton" android:text="🚗 다시 출발" />
+
+            <TextView
                 android:id="@+id/settingsTitle"
                 style="@style/PanelTitle"
+                android:layout_marginTop="28dp"
                 android:text="설정 (정차 중에만)" />
 
             <LinearLayout
@@ -237,25 +272,6 @@
                 style="@style/PanelLabel"
                 android:text="주행 중에는 설정을 열 수 없어요"
                 android:visibility="gone" />
-
-            <TextView
-                style="@style/PanelTitle"
-                android:layout_marginTop="28dp"
-                android:text="시연 패널" />
-
-            <TextView
-                android:id="@+id/envText"
-                style="@style/PanelLabel"
-                android:text="연동 상태 확인 중" />
-
-            <Button android:id="@+id/demoDrive" style="@style/PanelButton" android:text="🚗 데모 주행 (영동고속도로)" />
-            <Button android:id="@+id/demoParking" style="@style/PanelButton" android:text="⏪ 후진 주차 시연" />
-            <Button android:id="@+id/demoMinutes" style="@style/PanelButton" android:text="⏱ 운전 시간 +30분" />
-            <Button android:id="@+id/demoNight" style="@style/PanelButton" android:text="🌙 밤 / 낮 전환" />
-            <Button android:id="@+id/demoRear" style="@style/PanelButton" android:text="👥 뒷좌석 탑승 전환" />
-            <Button android:id="@+id/demoAttention" style="@style/PanelButton" android:text="☕ 차량 졸음 경고 켜기/끄기" />
-            <Button android:id="@+id/demoArrive" style="@style/PanelButton" android:text="🅿 쉼터 도착" />
-            <Button android:id="@+id/demoResume" style="@style/PanelButton" android:text="🚗 다시 출발" />
 
             <TextView
                 android:id="@+id/logText"

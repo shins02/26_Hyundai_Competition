@@ -76,18 +76,38 @@ class PleosSpeaker(context: Context, private val main: Handler) : Speaker {
     }
 }
 
-/** Pleos SpeechToText로 "1번", "네", "그만" 같은 짧은 대답을 한 번 듣습니다. */
-class PleosAnswerListener(context: Context, private val main: Handler) : AnswerListener {
+/**
+ * Pleos SpeechToText로 "1번", "네", "그만" 같은 짧은 대답을 한 번 듣습니다.
+ *
+ * - 듣는 시간은 마이크가 실제로 열린 때부터 셉니다. 말이 들어오는 동안(중간 결과)에는 조금씩 늘립니다.
+ * - 시간이 다 되면 그때까지 들린 중간 결과를 대답으로 씁니다.
+ * - 들은 말과 마이크 소리 크기를 기록해, 인식이 안 될 때 원인을 볼 수 있게 합니다.
+ */
+class PleosAnswerListener(
+    context: Context,
+    private val main: Handler,
+    private val onHeard: (String) -> Unit = {},
+    /** 마이크가 열려 말해도 될 때 */
+    private val onListening: () -> Unit = {},
+) : AnswerListener {
 
     private val stt = SpeechToText(context, SttMode.ON_DEVICE)
     private var onResult: ((String?) -> Unit)? = null
     private var ready = false
+    private var timeoutMs = 8_000L
+    private var partial: String? = null
+    private var maxRms = 0.0
 
     override val available: Boolean get() = ready
 
     private val timeout = Runnable {
         runCatching { stt.stop() }
-        deliver(null)
+        deliver(partial)
+    }
+
+    private fun restartTimer(ms: Long) {
+        main.removeCallbacks(timeout)
+        main.postDelayed(timeout, ms)
     }
 
     fun start(onReady: (Boolean) -> Unit) {
@@ -99,14 +119,28 @@ class PleosAnswerListener(context: Context, private val main: Handler) : AnswerL
                             stt.setLocale(Locale.KOREA)
                             stt.addListener(object : ResultListener {
                                 override fun onUpdated(p0: String, p1: Boolean) {
-                                    if (p1) deliver(p0)
+                                    main.post {
+                                        if (onResult == null) return@post
+                                        if (p1) deliver(p0) else if (p0.isNotBlank()) {
+                                            partial = p0
+                                            restartTimer(EXTEND_MS)
+                                        }
+                                    }
                                 }
                                 override fun onUpdatedEpdData(p0: Long, p1: Long) = Unit
                                 override fun onStartedRecognition() = Unit
                                 override fun onEndedRecognition() = Unit
-                                override fun onError(p0: SttError) { Log.w(TAG, "Pleos STT 오류: $p0"); deliver(null) }
-                                override fun onReady() = Unit
-                                override fun onUpdatedRms(p0: Double) = Unit
+                                override fun onError(p0: SttError) { Log.w(TAG, "Pleos STT 오류: $p0"); deliver(partial) }
+                                // 마이크가 열린 때(ReadyToStartRecognition)부터 듣는 시간을 셉니다.
+                                // 에뮬레이터에서는 요청 뒤 열리기까지 6초 넘게 걸리기도 합니다.
+                                override fun onReady() {
+                                    main.post {
+                                        if (onResult == null) return@post
+                                        restartTimer(timeoutMs)
+                                        onListening()
+                                    }
+                                }
+                                override fun onUpdatedRms(p0: Double) { if (p0 > maxRms) maxRms = p0 }
                             })
                         }.onFailure { Log.w(TAG, "Pleos STT 설정 실패", it) }.isSuccess
                         ready = ok
@@ -120,8 +154,11 @@ class PleosAnswerListener(context: Context, private val main: Handler) : AnswerL
 
     override fun listen(timeoutMs: Long, onResult: (String?) -> Unit) {
         this.onResult = onResult
-        main.removeCallbacks(timeout)
-        main.postDelayed(timeout, timeoutMs)
+        this.timeoutMs = timeoutMs
+        partial = null
+        maxRms = 0.0
+        // 마이크가 열리기까지 기다립니다 (열리면 onReady에서 다시 셈)
+        restartTimer(timeoutMs + OPEN_GRACE_MS)
         runCatching { stt.request() }.onFailure { deliver(null) }
     }
 
@@ -141,8 +178,15 @@ class PleosAnswerListener(context: Context, private val main: Handler) : AnswerL
             val callback = onResult ?: return@post
             onResult = null
             main.removeCallbacks(timeout)
+            Log.i(TAG, "STT 결과: ${text ?: "(못 들음)"} · 최대 소리 크기 ${"%.1f".format(maxRms)}")
+            onHeard(if (text.isNullOrBlank()) "🎤 대답을 못 들었어요 (마이크 소리 ${"%.0f".format(maxRms)})" else "🎤 들은 말: $text")
             callback(text)
         }
+    }
+
+    private companion object {
+        const val OPEN_GRACE_MS = 15_000L
+        const val EXTEND_MS = 2_500L
     }
 }
 

@@ -41,6 +41,10 @@ class DemoDrive(
 
     val isRunning get() = running
 
+    /** 지도용: 시연 구간 순서대로의 시·군 이름과, 한 구간 길이 */
+    val regions: List<String> get() = legs.map { it.region }
+    val legDurationMs: Long get() = legMs
+
     private val step = object : Runnable {
         override fun run() {
             if (!running) return
