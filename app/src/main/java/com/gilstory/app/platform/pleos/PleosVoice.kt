@@ -2,6 +2,7 @@ package com.gilstory.app.platform.pleos
 
 import android.content.Context
 import android.os.Handler
+import android.util.Log
 import ai.pleos.playground.stt.SpeechToText
 import ai.pleos.playground.stt.listener.ResultListener
 import ai.pleos.playground.tts.TextToSpeech
@@ -27,21 +28,28 @@ class PleosSpeaker(context: Context, private val main: Handler) : Speaker {
 
     fun start(onReady: (Boolean) -> Unit) {
         runCatching {
-            tts.setLocale(Locale.KOREA)
-            tts.addEventListener(object : EventListener {
-                override fun onStart() = Unit
-                override fun onReady() = Unit
-                override fun onDone() = finish()
-                // 오류가 나도 흐름이 멈추지 않도록 끝난 것으로 처리합니다
-                override fun onError(p0: TtsError) = finish()
-                override fun onStop() = Unit
-                override fun onUpdatedRms(p0: Double) = Unit
-            })
+            // setLocale·리스너 등록은 initialize 성공 뒤에 해야 합니다 (그 전에는 SDK 내부 객체가 없음)
             tts.initialize(object : TtsInit {
-                override fun onSuccess() { main.post { onReady(true) } }
-                override fun onFailure(p0: TtsError) { main.post { onReady(false) } }
+                override fun onSuccess() {
+                    main.post {
+                        val ok = runCatching {
+                            tts.setLocale(Locale.KOREA)
+                            tts.addEventListener(object : EventListener {
+                                override fun onStart() = Unit
+                                override fun onReady() = Unit
+                                override fun onDone() = finish()
+                                // 오류가 나도 흐름이 멈추지 않도록 끝난 것으로 처리합니다
+                                override fun onError(p0: TtsError) { Log.w(TAG, "Pleos TTS 오류: $p0"); finish() }
+                                override fun onStop() = Unit
+                                override fun onUpdatedRms(p0: Double) = Unit
+                            })
+                        }.onFailure { Log.w(TAG, "Pleos TTS 설정 실패", it) }.isSuccess
+                        onReady(ok)
+                    }
+                }
+                override fun onFailure(p0: TtsError) { Log.w(TAG, "Pleos TTS 준비 실패: $p0"); main.post { onReady(false) } }
             })
-        }.onFailure { onReady(false) }
+        }.onFailure { Log.w(TAG, "Pleos TTS 준비 실패", it); onReady(false) }
     }
 
     override fun speak(text: String, onDone: () -> Unit) {
@@ -84,23 +92,30 @@ class PleosAnswerListener(context: Context, private val main: Handler) : AnswerL
 
     fun start(onReady: (Boolean) -> Unit) {
         runCatching {
-            stt.setLocale(Locale.KOREA)
-            stt.addListener(object : ResultListener {
-                override fun onUpdated(p0: String, p1: Boolean) {
-                    if (p1) deliver(p0)
-                }
-                override fun onUpdatedEpdData(p0: Long, p1: Long) = Unit
-                override fun onStartedRecognition() = Unit
-                override fun onEndedRecognition() = Unit
-                override fun onError(p0: SttError) = deliver(null)
-                override fun onReady() = Unit
-                override fun onUpdatedRms(p0: Double) = Unit
-            })
             stt.initialize(object : SttInit {
-                override fun onSuccess() { main.post { ready = true; onReady(true) } }
-                override fun onFailure(p0: SttError) { main.post { ready = false; onReady(false) } }
+                override fun onSuccess() {
+                    main.post {
+                        val ok = runCatching {
+                            stt.setLocale(Locale.KOREA)
+                            stt.addListener(object : ResultListener {
+                                override fun onUpdated(p0: String, p1: Boolean) {
+                                    if (p1) deliver(p0)
+                                }
+                                override fun onUpdatedEpdData(p0: Long, p1: Long) = Unit
+                                override fun onStartedRecognition() = Unit
+                                override fun onEndedRecognition() = Unit
+                                override fun onError(p0: SttError) { Log.w(TAG, "Pleos STT 오류: $p0"); deliver(null) }
+                                override fun onReady() = Unit
+                                override fun onUpdatedRms(p0: Double) = Unit
+                            })
+                        }.onFailure { Log.w(TAG, "Pleos STT 설정 실패", it) }.isSuccess
+                        ready = ok
+                        onReady(ok)
+                    }
+                }
+                override fun onFailure(p0: SttError) { Log.w(TAG, "Pleos STT 준비 실패: $p0"); main.post { ready = false; onReady(false) } }
             })
-        }.onFailure { onReady(false) }
+        }.onFailure { Log.w(TAG, "Pleos STT 준비 실패", it); onReady(false) }
     }
 
     override fun listen(timeoutMs: Long, onResult: (String?) -> Unit) {
@@ -130,3 +145,5 @@ class PleosAnswerListener(context: Context, private val main: Handler) : AnswerL
         }
     }
 }
+
+private const val TAG = "Gilstory"

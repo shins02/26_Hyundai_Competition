@@ -64,10 +64,9 @@ class MainActivity : Activity() {
     private var parked = false
     private val audioManager by lazy { getSystemService(android.media.AudioManager::class.java) }
     private var focusRequested = false
-    private lateinit var focusRequest: android.media.AudioFocusRequest
-    private fun startWithAudio() {
-        if (session.view().running) return
-        val request = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+    // 요청 객체를 하나만 씁니다. 누를 때마다 새로 만들면 앞 요청이 "포커스 잃음"을 받아 이야기를 멈춥니다.
+    private val focusRequest: android.media.AudioFocusRequest by lazy {
+        android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setAcceptsDelayedFocusGain(true).setWillPauseWhenDucked(true)
@@ -78,8 +77,11 @@ class MainActivity : Activity() {
                     else -> session.onAudioAllowed(false)
                 }
             }, main).build()
-        focusRequest = request
-        val result = audioManager.requestAudioFocus(request)
+    }
+    private fun startWithAudio() {
+        if (session.view().running) return
+        val result = audioManager.requestAudioFocus(focusRequest)
+        Log.i(TAG, "오디오 포커스 요청 결과: $result")
         if (result == android.media.AudioManager.AUDIOFOCUS_REQUEST_FAILED) {
             addLog("다른 차량 안내가 끝난 뒤 다시 시작해 주세요")
             return
@@ -93,6 +95,10 @@ class MainActivity : Activity() {
     private var rearOccupied = false
     private var attentionOn = false
     private var vehicleMinutes = 0
+    // 차량이 주행 시간을 주지 않으면(에뮬레이터 등) 앱이 P단이 아닌 시간을 직접 셉니다
+    private var ownDrivingClock = false
+    private var ownDrivingMs = 0L
+    private var lastTickMs = 0L
     private var demoMinutes = 0
     private var extraMinutes = 0
     private val env = linkedMapOf("차량" to "…", "내비" to "…", "음성 합성" to "…", "음성 인식" to "…", "빌트인캠" to "…")
@@ -105,6 +111,7 @@ class MainActivity : Activity() {
 
     private val ticker = object : Runnable {
         override fun run() {
+            countOwnDrivingTime()
             session.onTick()
             updateNight()
             main.postDelayed(this, TICK_MS)
@@ -229,7 +236,12 @@ class MainActivity : Activity() {
 
         override fun onSignalError(name: String, error: Exception) {
             if (name == "기어" && !demo.isRunning) setParked(false, known = false)
+            if (name == "주행 시간" && !ownDrivingClock) {
+                ownDrivingClock = true
+                addLog("⏱ 차량 주행 시간이 없어 앱이 직접 셉니다")
+            }
             setEnv("차량", "일부 신호 없음")
+            Log.w(TAG, "$name 신호를 받을 수 없음", error)
             addLog("⚠ $name 신호를 받을 수 없음: ${error.message ?: error.javaClass.simpleName}")
         }
     }
@@ -313,6 +325,19 @@ class MainActivity : Activity() {
     private fun isNight() = headlampOn || demoNight || clock.hour() >= 19 || clock.hour() < 6
 
     private fun updateNight() = session.onNight(isNight())
+
+    private fun countOwnDrivingTime() {
+        val now = SystemClock.elapsedRealtime()
+        val gap = if (lastTickMs == 0L) 0L else now - lastTickMs
+        lastTickMs = now
+        if (!ownDrivingClock || demo.isRunning || parked) return
+        ownDrivingMs += gap
+        val minutes = (ownDrivingMs / 60_000L).toInt()
+        if (minutes != vehicleMinutes) {
+            vehicleMinutes = minutes
+            pushMinutes()
+        }
+    }
 
     private fun totalMinutes() = maxOf(vehicleMinutes, demoMinutes) + extraMinutes
 

@@ -12,6 +12,8 @@
 
     <!-- Vehicle SDK: 모두 읽기 권한만 사용합니다 (CONTROL_CAR_* 없음) -->
     <uses-permission android:name="pleos.car.permission.CAR_SAFETY" />
+    <!-- 경고등(Telltale: 운전자 주의 경고) 읽기는 PRIVATE_CAR_SAFETY가 있어야 합니다 (Pleos 에뮬레이터 v2.1.0에서 확인) -->
+    <uses-permission android:name="pleos.car.permission.PRIVATE_CAR_SAFETY" />
     <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
     <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
     <uses-permission android:name="pleos.car.permission.CAR_SEATS" />

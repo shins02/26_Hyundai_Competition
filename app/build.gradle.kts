@@ -1,5 +1,13 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
+}
+
+// release 서명 정보는 저장소 밖에 둡니다. keystore.properties가 없으면 서명 없이 빌드됩니다.
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.reader(Charsets.UTF_8).use { load(it) }
 }
 
 android {
@@ -16,7 +24,21 @@ android {
         manifestPlaceholders["automotiveRequired"] = "true"
     }
 
+    signingConfigs {
+        if (keystoreProps.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
+        release {
+            signingConfig = signingConfigs.findByName("release")
+        }
         debug {
             manifestPlaceholders["automotiveRequired"] = "false"
         }

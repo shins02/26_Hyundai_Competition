@@ -15,3 +15,6 @@ node_modules/
 parking-demo/주차메모.app/
 # 용량이 큰 영상은 저장소 대신 유튜브 링크로 냅니다 (GitHub 파일 한도 100MB)
 *.mp4
+# release 서명 정보 (서명 키는 저장소 밖 ../서명키/ 에 있습니다)
+keystore.properties
+*.jks

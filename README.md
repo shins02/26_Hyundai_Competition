@@ -2,6 +2,89 @@
 
 현대자동차그룹 차량용 앱 개발 공모전 출품용 프로젝트입니다. Pleos Connect(Android Automotive OS) 앱과, 시연 영상을 찍기 위한 **차량 화면 모의 테스터**로 이루어져 있습니다.
 
+## 공모전 제출 정보
+
+### 1. 앱 이름 및 한 줄 소개
+
+- **앱 이름:** S J Story
+- **한 줄 소개:** 장거리 운전 중 지나가는 지역의 이야기를 들려주고, 차량 졸음 경고가 오면 쉼터를 안내하며, 주차 후에는 주차 위치까지 알려 주는 차량용 음성 이야기 앱입니다.
+
+### 2. 실행 방법
+
+**A. Pleos Connect 에뮬레이터에서 APK 실행 (심사용)**
+
+1. Android Studio → Tools → SDK Manager → SDK Update Sites → `+`
+   - Name: `Pleos Connect System Image`
+   - URL(Mac, Apple Silicon): `https://nexus-playground.pleos.ai/repository/raw-releases/connect-avd/2.x/crp-arm64-sys-img.xml`
+2. SDK Platforms에서 **Pleos Connect v2.1.0 APIs arm64 System Image**(API 34)를 설치하고 Android Studio를 다시 시작합니다.
+3. Device Manager → Automotive → **Pleos Connect v2.1.0**으로 AVD를 만들고 Cold Boot로 켭니다.
+4. 부팅이 끝나면 APK를 설치합니다. 에뮬레이터 창에 APK 파일을 끌어다 놓아도 됩니다.
+   ```bash
+   adb install -r apk/신동주_SJStory_release.apk
+   ```
+5. 앱 목록에서 **S J Story**를 누르거나 아래 명령으로 실행합니다.
+   ```bash
+   adb shell am start -n com.gilstory.app/.ui.MainActivity
+   ```
+6. Pleos Connect Virtual Console로 기어(P/R/D), 경고등, 주행 시간을 바꾸면 앱이 반응합니다. 화면 오른쪽 **시연 패널**의 버튼(데모 주행, 운전 시간 +30분, 차량 졸음 경고, 쉼터 도착, 후진 주차 시연)으로도 같은 상황을 만들 수 있습니다.
+
+**B. 소스에서 직접 빌드**
+
+```bash
+./gradlew :app:assembleDebug     # 테스트용 (휴대폰 에뮬레이터에도 설치 가능)
+./gradlew :app:assembleRelease   # 제출용 release (서명 정보 keystore.properties 필요)
+```
+
+release 서명 키와 비밀번호(`keystore.properties`, `*.jks`)는 저장소에 올리지 않았습니다. 서명 정보 없이 `assembleRelease`를 실행하면 서명되지 않은 APK가 만들어집니다.
+
+**C. 차량 화면 모의 테스터 (시연 영상용, PC Chrome)**
+
+`simulator/start.command`를 더블클릭하면 Chrome에서 `http://localhost:8791`로 열립니다. 자세한 사용법은 아래 [모의 테스터로 시연 영상 찍기](#모의-테스터로-시연-영상-찍기)에 있습니다. 모의 테스터의 마이크 대답은 PC 시연용으로 Chrome 음성 인식을 쓰고, 차량 앱은 Pleos SpeechToText SDK만 씁니다.
+
+### 3. 테스트 환경 및 필요한 설정
+
+| 항목 | 값 |
+|---|---|
+| 개발·테스트 PC | macOS 27.2 (Apple M1, 메모리 8GB) |
+| 개발 도구 | Android Studio 2024.1, JDK 17 (Android Studio 내장 JBR) |
+| 빌드 | Gradle 9.8.0, Android Gradle Plugin 9.4.1, Kotlin |
+| SDK 버전 | compileSdk 36, **minSdk 28**, targetSdk 34 |
+| Pleos Connect SDK | Vehicle 2.3.2, NaviHelper 3.0.5, TextToSpeech 3.3.1, SpeechToText 3.3.1 |
+| 앱 패키지 | `com.gilstory.app` (버전 0.1.0) |
+| 권한 | `pleos.car.permission.CAR_SAFETY`, `PRIVATE_CAR_SAFETY`(경고등), `CAR_DRIVE`, `CAR_LIGHTS`, `CAR_SEATS`, `CAR_INFO`, `NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`, `TTS_SERVICE`, `STT_SERVICE` (설치 시 자동 부여) |
+| API 키 | 필요 없음. 실제 차량도 필요 없습니다 |
+| 인터넷 | 앱은 인터넷 없이 동작합니다. 이야기·휴게소 자료는 앱 안(`assets/`)에 들어 있습니다 |
+
+- 이 에뮬레이터는 차량의 "주행 시간" 신호를 주지 않습니다(`ERROR_NOT_SUPPORTED_PROPERTY`). 이때 앱은 P단이 아닌 시간을 직접 세어 장시간 운전 안내에 씁니다. 시연 패널의 **운전 시간 +30분**으로 바로 만들 수도 있습니다.
+- 메모리가 8GB인 PC에서는 첫 부팅 때 차량 서비스가 늦게 떠서 시스템 앱이 멈출 수 있습니다. 그럴 때는 에뮬레이터를 한 번 다시 시작(Cold Boot)하면 정상으로 돌아옵니다.
+
+### 4. 개발에 사용한 Pleos Connect 에뮬레이터 버전과 화면 규격
+
+| 항목 | 값 |
+|---|---|
+| 에뮬레이터 이미지 | **Pleos Connect v2.1.0** APIs arm64 System Image (revision 2, 42dot) |
+| 빌드 표시 | `RELEASE.release_connect_v2.1.0` |
+| Android | Android 14 (API 34), Automotive, arm64-v8a |
+| Android Emulator | 37.2.12 |
+| AVD 기기 프로필 | Pleos Connect v2.1.0 (12.8인치), RAM 4GB |
+| **화면 규격** | **2560 × 1440 px, 160 dpi (mdpi), 가로(Landscape)** |
+| 앱 창 크기 | 1682 × 1210 px (Pleos 홈 화면의 앱 영역, 왼쪽은 차량 상태 패널) |
+
+### 5. APK 파일 위치
+
+- **`apk/신동주_SJStory_release.apk`** (release 빌드, 서명 완료, 약 27MB, Pleos 에뮬레이터 v2.1.0에서 실행 확인)
+- 파일 이름은 공모전 규정 `팀명_앱이름_release.apk`를 따랐습니다(개인 참가라 팀명 자리에 성명).
+- 용량이 GitHub 한도(100MB)보다 작아 저장소 안에 바로 넣었습니다.
+
+### 외부 자료와 라이선스
+
+| 자료 | 쓰인 곳 | 라이선스 |
+|---|---|---|
+| Supertone Supertonic 2 | 모의 테스터의 미리 녹음한 목소리 | OpenRAIL-M |
+| Natural Earth | 모의 테스터 지도 | 퍼블릭 도메인 |
+| Tesseract.js | 모의 테스터 주차 장면 글자 인식 (인터넷에서 불러옴) | Apache-2.0 |
+| 한국도로공사 휴게소정보 (공공데이터포털) | `rest_stops.json` | 공공누리 |
+
 ## 폴더 구성
 
 | 경로 | 내용 |
@@ -13,6 +96,7 @@
 | `app/src/main/assets/rest_stops.json` | 영동선 휴게소 7곳의 좌표와 방향. 제출 전 한국도로공사 원자료 대조 필요 |
 | `app/src/main/java/.../core/` | 졸음 단계 판단, 장르 선택, 이야기 고르기, 대답 인식, 흐름 관리 (플랫폼과 분리, 단위 테스트 있음) |
 | `app/src/main/java/.../platform/pleos/` | Pleos SDK 연동: Vehicle(경고등·주행 시간·기어·전조등·좌석), NaviHelper(현재 주소·경유지), TTS, STT |
+| `apk/신동주_SJStory_release.apk` | 제출용 release APK |
 | `scripts/test.sh` | 단위 테스트 실행 |
 
 ## 모의 테스터로 시연 영상 찍기
@@ -123,20 +207,7 @@ python3 simulator/build_simulator.py
 
 ## 실제 Pleos 에뮬레이터에서 앱 실행하기
 
-1. 디스크 공간을 15GB 이상 비웁니다. Pleos 에뮬레이터 이미지가 약 4.7GB(압축)입니다.
-2. Android Studio → Tools → SDK Manager → SDK Update Sites → `+`
-   - Name: `Pleos Connect System Image`
-   - URL(Mac): `https://nexus-playground.pleos.ai/repository/raw-releases/connect-avd/2.x/crp-arm64-sys-img.xml`
-3. SDK Platforms에서 Pleos Connect 시스템 이미지(API 34)를 설치하고 Android Studio를 다시 시작합니다.
-4. Device Manager → Automotive → Pleos Connect v2.1.0, RAM 4GB, Cold boot로 AVD를 만듭니다.
-5. 이 폴더(`gilstory`)를 Android Studio로 열고 실행합니다.
-6. Pleos Connect Virtual Console로 기어(P/D), 경고등, 주행거리를 바꿔 가며 확인합니다.
-
-빌드는 명령줄에서도 됩니다.
-
-```bash
-./gradlew :app:assembleDebug
-```
+위 [공모전 제출 정보 → 2. 실행 방법](#2-실행-방법)을 보세요. 에뮬레이터 이미지는 압축 4.7GB, 설치 후 약 6.5GB이니 디스크 공간을 15GB 이상 비워 두세요.
 
 ## 테스트
 
@@ -148,8 +219,9 @@ python3 simulator/build_simulator.py
 
 ## 아직 남은 일 / 확인 필요
 
-- **Pleos 에뮬레이터 실행 확인 전**입니다. 빌드와 단위 테스트까지만 확인했습니다. Pleos SDK 함수 이름과 인자는 SDK 파일(AAR)을 직접 열어 맞췄습니다.
-- 일반 안드로이드 16 휴대폰 에뮬레이터에서는 설치는 되지만 화면 실행이 막혔습니다. 원인을 확인하지 못했고, 실제 대상인 Pleos 에뮬레이터에서 확인이 필요합니다.
+- **Pleos 에뮬레이터(v2.1.0) 확인 결과 (2026-11-12)**: release APK 설치·실행, 화면(2560×1440), Vehicle SDK(경고등·주행 거리·기어·전조등), NaviHelper SDK(현재 지역 "수정구" 표시), **Pleos TTS(온디바이스)로 이야기 읽기**, Pleos STT 연결, ▶ 시작 → 밤 모드 제안 → "1번" → 오싹한 이야기 재생까지 확인했습니다.
+  - 고친 점: Pleos TTS·STT는 `initialize` 성공 뒤에 `setLocale`을 불러야 합니다(전에는 순서가 반대라 기본 TTS로 넘어갔음). 오디오 포커스 요청을 하나만 쓰도록 바꿔, ▶ 시작을 다시 누르면 이야기가 바로 멈추던 문제를 고쳤습니다. 경고등 읽기에 필요한 `PRIVATE_CAR_SAFETY` 권한을 넣었습니다.
+  - 아직 에뮬레이터에서 못 해 본 것: 기어를 D로 바꾼 주행 중 음성 대답, Virtual Console로 넣는 경고등 신호, 경유지 추가. 이 PC(메모리 8GB)에서는 에뮬레이터가 오래 켜져 있으면 차량 서비스가 멈춰 시험을 이어 가지 못했습니다.
 - 주행 시간(`getTripCurrentDrivingTime`)의 단위를 **초로 가정**했습니다 (`PleosVehicleSignals.DRIVING_TIME_IN_SECONDS`). Virtual Console 값으로 확인해야 합니다.
 - 쉼터 후보는 **내비 길 안내 정보(TBT)의 전방 휴게소·졸음쉼터**(`TURN_ENTER_SERVICEAREA`, `TURN_RESTAREA`, 1~50km 앞)에서만 고릅니다. 좌표 직선거리만으로 고르면 반대 방향 휴게소를 권할 수 있기 때문입니다.
   - 안내 이름·방향이 `rest_stops.json`([한국도로공사 휴게소정보](https://www.data.go.kr/data/15025446/fileData.do)의 강릉 방향 6곳과 양방향 덕평 1곳)과 맞으면 경유지로 추가하고, 내비 경유지 목록에서 반영을 확인합니다.
@@ -158,7 +230,7 @@ python3 simulator/build_simulator.py
 - 쉼터 권유 지표(권유·수락·거절·무응답·도착 횟수, 졸음 경고 중 권유·도착)를 `RestMetrics`로 셉니다. 횟수만 세고 위치는 남기지 않으며, 앱을 닫을 때 로그(`Gilstory` 태그)에 남깁니다. 기획서의 성공 지표(쉼터 권유 수락률, 경고 뒤 휴식률)를 재는 용도입니다.
 - 주차 위치 기억: R단·P단 감지와 판단 로직(`core/ParkingLocator.kt`)은 구현했지만, Pleos SDK(Vehicle 2.3.2)에서 빌트인캠 영상 API를 찾지 못해 카메라는 `NoSignCamera`로 비어 있습니다. 차량 앱의 **⏪ 후진 주차 시연** 버튼은 기어와 글자를 정해진 값으로 넣습니다. 휴대폰 전송도 아직 없고 차량 화면 기록과 로그(`Gilstory` 태그)에만 남습니다. 모의 테스터에서는 경로가 끝난 뒤 이어지는 장면으로 볼 수 있습니다.
 - 맛집 정보는 한국관광공사 TourAPI(음식점) 연동을 전제로 문구만 넣어 두었습니다.
-- Pleos TTS·STT는 ON_DEVICE 모드를 씁니다. 한국어 지원 여부를 에뮬레이터에서 확인해야 합니다.
+- Pleos TTS·STT는 ON_DEVICE 모드를 씁니다. 에뮬레이터에서 한국어 TTS가 동작하는 것을 확인했습니다. STT 인식률은 실제 마이크로 확인해야 합니다.
 
 ## 이야기 콘텐츠 원칙
 
