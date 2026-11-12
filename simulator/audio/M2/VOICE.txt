@@ -1,0 +1,2 @@
+목소리: Supertone Supertonic 2 (M2), OpenRAIL-M 라이선스
+https://huggingface.co/Supertone/supertonic-2

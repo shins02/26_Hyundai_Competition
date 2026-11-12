@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- debug 빌드 전용: 일반 안드로이드 에뮬레이터에서도 화면과 데모 흐름을 확인할 수 있게 차량 전용 표시를 뺍니다.
+     release 빌드(앱 마켓 제출용)에는 영향이 없습니다. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-feature android:name="android.hardware.type.automotive" tools:node="remove" />
+</manifest>

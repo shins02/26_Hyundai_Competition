@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="GenreButton">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">0.8</item>
+        <item name="android:layout_marginStart">12dp</item>
+        <item name="android:background">@drawable/btn_surface</item>
+        <item name="android:textSize">30sp</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <style name="PanelTitle">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="PanelLabel">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">10dp</item>
+        <item name="android:textColor">@color/text_dim</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <style name="PanelCheck">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:checked">true</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">18sp</item>
+    </style>
+
+    <style name="PanelButton">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:layout_marginTop">10dp</item>
+        <item name="android:background">@drawable/btn_surface</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">17sp</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+</resources>

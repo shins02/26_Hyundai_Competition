@@ -1,0 +1,2112 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S J Story 차량 화면 시뮬레이터</title>
+<style>
+  :root {
+    --glass: #0b0f15; --ink: #f3f5f8; --dim: #8e9aac; --line: rgba(255,255,255,.08);
+    --accent: #4c8dff; --accent2: #7fb0ff; --green: #2fae74; --orange: #f0952a; --red: #e5483e;
+    --card: rgba(255,255,255,.055); --card2: rgba(255,255,255,.09);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { color: var(--ink); font-family: "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif; -webkit-font-smoothing: antialiased; }
+  button { font-family: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+
+  /* ===== 차량 실내 장면 (1920 x 1080 기준, 창 크기에 맞춰 축소) ===== */
+  #viewport { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  #scene { width: 1920px; height: 1080px; position: absolute; left: 0; top: 0; flex: none; transform-origin: 0 0; overflow: hidden; transition: transform .6s ease; }
+
+  /* 앞유리 너머 */
+  .outside { position: absolute; left: 0; top: 0; width: 100%; height: 560px; overflow: hidden;
+    background: linear-gradient(#5d7fa8 0%, #9fb7cf 55%, #c9d3d6 100%); transition: background 1.2s; }
+  .night .outside { background: linear-gradient(#03050c 0%, #0b1426 60%, #19213a 100%); }
+  #roadCv { position: absolute; left: 0; top: 0; width: 1920px; height: 560px; }
+  /* 도로 표지판 (지역 진입) */
+  .sign { position: absolute; right: 360px; top: 120px; background: #136b43; border: 5px solid #f2f2f2; border-radius: 12px;
+    padding: 12px 34px 14px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,.35); transform: scale(.4); opacity: 0;
+    transition: transform .9s ease, opacity .9s ease; }
+  .sign.show { transform: scale(1); opacity: 1; }
+  .sign .ko { font-size: 54px; font-weight: 800; letter-spacing: 2px; }
+  .sign .en { font-size: 24px; font-weight: 600; opacity: .9; }
+  .sign::after { content: ""; position: absolute; left: 50%; bottom: -150px; width: 12px; height: 150px; background: #8d9196; transform: translateX(-50%); }
+  .sign.rest { background: #1e4f9c; }
+
+  /* 대시보드 */
+  .dash { position: absolute; left: -40px; right: -40px; top: 500px; bottom: -20px;
+    background: radial-gradient(120% 60% at 50% 0%, #2a2d33 0%, #17191d 45%, #0d0e10 100%);
+    border-radius: 50% 50% 0 0 / 90px 90px 0 0; box-shadow: 0 -12px 40px rgba(0,0,0,.6); }
+  .dash::before { content: ""; position: absolute; left: 6%; right: 6%; top: 18px; height: 2px; background: linear-gradient(90deg, transparent, rgba(255,255,255,.12), transparent); }
+
+  /* 계기판 (클러스터) */
+  .cluster { position: absolute; left: 150px; top: 560px; width: 560px; height: 230px; border-radius: 26px;
+    background: linear-gradient(#0b0e13, #06080b); box-shadow: inset 0 0 0 2px #22262d, 0 10px 30px rgba(0,0,0,.6); padding: 22px 30px; }
+  .cl-top { display: flex; justify-content: space-between; color: var(--dim); font-size: 20px; }
+  .cl-speed { display: flex; align-items: baseline; gap: 10px; margin-top: 4px; }
+  .cl-speed b { font-size: 92px; line-height: 1; font-weight: 700; letter-spacing: -2px; }
+  .cl-speed span { color: var(--dim); font-size: 22px; }
+  .cl-gear { margin-left: auto; font-size: 26px; font-weight: 700; color: #3c4554; letter-spacing: 8px; }
+  .cl-gear i { font-style: normal; } .cl-gear i.on { color: var(--ink); }
+  .telltales { display: flex; gap: 18px; margin-top: 10px; font-size: 26px; }
+  .tt { opacity: .16; filter: grayscale(1); transition: all .3s; }
+  .tt.on { opacity: 1; filter: none; }
+  .tt.amber.on { text-shadow: 0 0 14px rgba(240,149,42,.9); }
+  .cl-now { position: absolute; left: 30px; right: 30px; bottom: 18px; color: var(--dim); font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 핸들 */
+  .wheel { position: absolute; left: 90px; top: 815px; width: 680px; height: 680px; border-radius: 50%;
+    border: 46px solid #121316; box-shadow: inset 0 0 0 2px #2a2c31, 0 0 0 2px #050506, 0 20px 50px rgba(0,0,0,.7); }
+  .wheel::before { content: ""; position: absolute; left: 50%; top: 50%; width: 230px; height: 150px; transform: translate(-50%, -30%);
+    background: radial-gradient(#26282d, #141518); border-radius: 50px; box-shadow: 0 0 0 2px #2b2d32; }
+  .wheel::after { content: ""; position: absolute; left: 30px; right: 30px; top: 46%; height: 40px; background: #121316; border-radius: 20px; }
+
+  /* 중앙 디스플레이 */
+  .display-frame { position: absolute; left: 790px; top: 530px; width: 1080px; height: 450px; border-radius: 26px; padding: 10px;
+    background: linear-gradient(#1b1d21, #0c0d0f); box-shadow: 0 18px 40px rgba(0,0,0,.7), inset 0 0 0 2px #2b2e33; }
+  .display { width: 100%; height: 100%; border-radius: 18px; overflow: hidden; background: var(--glass); position: relative;
+    display: grid; grid-template-rows: 34px 1fr 74px; }
+  .display::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: 18px;
+    background: linear-gradient(115deg, rgba(255,255,255,.07) 0%, transparent 28%, transparent 100%); }
+  .sbar { display: flex; align-items: center; justify-content: space-between; padding: 0 18px; font-size: 15px; color: var(--dim); }
+  .sbar b { color: var(--ink); font-size: 16px; }
+  .sbar .np { display: flex; align-items: center; gap: 8px; color: var(--ink); }
+  .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 12px; }
+  .eq i { width: 3px; background: var(--accent2); border-radius: 1px; height: 4px; }
+  .speaking .eq i:nth-child(1) { height: 10px; } .speaking .eq i:nth-child(2) { height: 6px; } .speaking .eq i:nth-child(3) { height: 12px; }
+  .content { display: grid; grid-template-columns: 455px 1fr; min-height: 0; }
+
+  /* 지도 */
+  .map { position: relative; overflow: hidden; background: #111820; }
+  .night .map { background: #0a0f15; }
+  .map svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #mSea { fill: #0d1620; } .night #mSea { fill: #060a10; }
+  #mOther path { fill: #161e28; stroke: #222c38; stroke-width: .8; vector-effect: non-scaling-stroke; }
+  #mLand path { fill: #1f2c3b; stroke: #3a4d63; stroke-width: 1; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+  .night #mOther path { fill: #0e141b; stroke: #19212b; } .night #mLand path { fill: #16202c; stroke: #2a394a; }
+  #mLabels text { fill: #93a1b5; font-size: 11.5px; paint-order: stroke; stroke: rgba(8,12,18,.9); stroke-width: 3px; stroke-linejoin: round; }
+  #mLabels text.on { fill: #fff; font-weight: 700; font-size: 13px; }
+  #mLabels circle { fill: #93a1b5; }
+  #mRoute path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  #mRoute .case { stroke: #08101a; stroke-width: 11; }
+  #mRoute .done { stroke: #7d8a9c; stroke-width: 7; }
+  #mRoute .left { stroke: #2f7dff; stroke-width: 7; }
+  #mRoute .wp { stroke: #1fcf8f; stroke-width: 7; }
+  #mRoute .wpglow { stroke: #1fcf8f; stroke-width: 15; opacity: .35; filter: blur(3px); }
+  #mArrows path { fill: none; stroke: #fff; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; opacity: .95; }
+  #mStops text { fill: #fff; font-size: 9.5px; font-weight: 800; text-anchor: middle; }
+  #mStops .start circle { fill: #19b36b; stroke: #fff; stroke-width: 2; }
+  #mStops .end path { fill: #e5484d; stroke: #fff; stroke-width: 1.6; }
+  #mStops .rest rect { fill: #f2a516; stroke: #0b0f15; stroke-width: 1.5; }
+  #mStops .rest.visited rect { fill: #5c6878; }
+  #mStops .rest.asking rect { stroke: #fff; }
+  #mStops .rest .ask { fill: none; stroke: #f2a516; stroke-width: 2; }
+  #mStops .wpin path { fill: #1fcf8f; stroke: #fff; stroke-width: 2; }
+  #mStops .wpin text { font-size: 8.5px; }
+  #mStops .wpin.here path { fill: #2f7dff; }
+  #mStops .wpin .pulse { fill: none; stroke: #1fcf8f; stroke-width: 2.5; }
+  #mStops .wpin .shadow { fill: rgba(0,0,0,.45); }
+  #mCallout rect { fill: rgba(16,120,84,.95); stroke: rgba(255,255,255,.35); }
+  #mCallout text { fill: #fff; font-size: 13px; font-weight: 700; }
+  #mCar .halo { fill: rgba(47,125,255,.28); } #mCar .dot { fill: #2f7dff; stroke: #fff; stroke-width: 2.5; } #mCar path { fill: #fff; }
+  #mCredit { fill: rgba(255,255,255,.3); font-size: 9px; }
+  .tbt { position: absolute; left: 12px; top: 10px; right: 12px; background: rgba(12,40,90,.92); border-radius: 12px; padding: 8px 14px; display: flex; gap: 12px; align-items: center; }
+  .tbt .arrow { font-size: 30px; }
+  .tbt .t1 { font-size: 17px; font-weight: 700; }
+  .tbt .t2 { font-size: 13px; color: #b9cbe8; }
+  .limit { position: absolute; left: 14px; bottom: 12px; width: 52px; height: 52px; border-radius: 50%; background: #fff; border: 6px solid #d83a32; color: #111; font-weight: 800; font-size: 19px; display: flex; align-items: center; justify-content: center; }
+  .cur { position: absolute; left: 76px; bottom: 16px; background: rgba(0,0,0,.6); border-radius: 10px; padding: 4px 10px; font-size: 15px; }
+  .cur b { font-size: 22px; }
+
+  /* S J Story 앱 */
+  .app { padding: 12px 16px 10px; display: flex; flex-direction: column; gap: 8px; min-height: 0; border-left: 1px solid var(--line); }
+  .ahead { display: flex; align-items: center; gap: 10px; }
+  .pill { padding: 4px 12px; border-radius: 99px; font-size: 15px; font-weight: 700; background: var(--green); white-space: nowrap; }
+  .region { font-size: 17px; white-space: nowrap; }
+  .aname { margin-left: auto; color: var(--dim); font-size: 14px; display: flex; gap: 6px; align-items: center; }
+  .story { flex: 1; min-height: 0; background: var(--card); border-radius: 16px; padding: 12px 16px; display: flex; flex-direction: column; position: relative; }
+  .srow { display: flex; gap: 14px; align-items: center; }
+  .emoji { font-size: 52px; line-height: 1; }
+  .title { font-size: 23px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status { font-size: 14px; color: var(--dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ttl { min-width: 0; }
+  .subtitle { margin-top: 10px; font-size: 16px; line-height: 1.55; color: #d9dfe8; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .subtitle.off { visibility: hidden; }
+  .bars { display: flex; gap: 4px; margin-top: auto; padding-top: 8px; }
+  .bars i { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); }
+  .bars i.on { background: var(--accent); }
+  .badge { position: absolute; top: 10px; right: 12px; font-size: 11.5px; color: var(--dim); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+  .answers { display: none; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .answers.show { display: grid; }
+  .answers button { height: 54px; border-radius: 14px; background: var(--accent); font-size: 17px; font-weight: 700; padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .answers button .k { opacity: .75; margin-right: 6px; }
+  .answers.voice button { background: transparent; box-shadow: inset 0 0 0 2px rgba(127,176,255,.45); color: #cfe0ff; pointer-events: none; }
+  .voicebar { display: none; align-items: center; gap: 10px; font-size: 15px; color: #cfe0ff; min-height: 22px; }
+  .voicebar.show { display: flex; }
+  .voicebar .dot { width: 10px; height: 10px; border-radius: 50%; background: #e5483e; box-shadow: 0 0 0 4px rgba(229,72,62,.25); }
+  .voicebar.idle .dot { background: #7fb0ff; box-shadow: 0 0 0 4px rgba(127,176,255,.2); }
+  .voicebar .heard { color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .story.asking .subtitle { -webkit-line-clamp: 2; }
+
+  /* 독 */
+  .dock { display: flex; align-items: center; gap: 8px; padding: 0 14px; background: rgba(255,255,255,.04); border-top: 1px solid var(--line); }
+  .dock .ico { width: 50px; height: 50px; border-radius: 14px; font-size: 24px; display: flex; align-items: center; justify-content: center; color: var(--dim); }
+  .dock .ico.active { background: var(--card2); color: var(--ink); }
+  .dock .sep { width: 1px; height: 36px; background: var(--line); margin: 0 4px; }
+  .dock .btn { height: 52px; border-radius: 14px; background: var(--card2); font-size: 16px; padding: 0 14px; white-space: nowrap; }
+  .dock .btn.primary { background: var(--accent); font-weight: 700; min-width: 92px; }
+  .dock .g { width: 52px; height: 52px; border-radius: 14px; background: var(--card); font-size: 26px; }
+  .dock .g.sel { box-shadow: inset 0 0 0 3px var(--accent); background: var(--card2); }
+  .dock .mic.on { background: #24406e; }
+  .clim { margin-left: auto; display: flex; align-items: center; gap: 10px; color: var(--dim); font-size: 15px; }
+  .clim b { color: var(--ink); font-size: 22px; font-weight: 600; }
+
+  /* 목소리 고르기 (중앙 디스플레이 안의 창) */
+  .vpick { position: absolute; inset: 34px 0 74px 0; background: rgba(8,11,16,.96); display: none; padding: 16px 22px; z-index: 5; }
+  .vpick.show { display: flex; flex-direction: column; gap: 10px; }
+  .vpick .vh { display: flex; align-items: center; gap: 12px; }
+  .vpick .vh b { font-size: 21px; }
+  .vpick .vh span { color: var(--dim); font-size: 14px; }
+  .vpick .vh button { margin-left: auto; background: var(--card2); border-radius: 12px; padding: 8px 14px; font-size: 15px; }
+  .vlist { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; overflow: auto; }
+  .vrow { background: var(--card); border-radius: 14px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; }
+  .vrow.sel { box-shadow: inset 0 0 0 2px var(--accent); background: var(--card2); }
+  .vrow .vi { font-size: 30px; }
+  .vrow .vn { font-size: 17px; font-weight: 700; }
+  .vrow .vd { font-size: 13px; color: var(--dim); margin-top: 2px; }
+  .vrow .vb { margin-left: auto; display: flex; gap: 6px; }
+  .vrow .vb button { background: var(--card2); border-radius: 10px; padding: 8px 10px; font-size: 14px; white-space: nowrap; }
+  .vrow .vb button.pick { background: var(--accent); font-weight: 700; }
+  .vpick .story { color: #bfe0ff; font-size: 14px; }
+
+  /* 디스플레이 아래 물리 버튼 */
+  .hw { position: absolute; left: 1040px; top: 1000px; display: flex; gap: 26px; align-items: center; }
+  .hw .k { width: 64px; height: 30px; border-radius: 8px; background: #1b1d21; box-shadow: inset 0 0 0 1px #2d3036; color: #6f7784; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  .hw .hazard { width: 70px; height: 40px; background: #24161a; color: #e5483e; font-size: 22px; }
+  .hw .knob { width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(#3a3d43, #16171a); box-shadow: 0 0 0 3px #26282d; }
+
+  /* ===== 시연 패널 (차량 밖, 오른쪽에서 열림) ===== */
+  #panelBtn { position: fixed; right: 14px; top: 14px; z-index: 30; background: rgba(20,24,31,.86); border: 1px solid #2b3340; border-radius: 12px; padding: 8px 12px; font-size: 14px; color: var(--ink); }
+  #panel { position: fixed; right: 0; top: 0; bottom: 0; width: 380px; z-index: 20; background: rgba(10,13,18,.96); border-left: 1px solid #222a35;
+    padding: 58px 18px 18px; overflow: auto; transform: translateX(100%); transition: transform .3s; font-size: 14px; }
+  #panel.open { transform: none; }
+  #panel h3 { margin: 16px 0 8px; font-size: 14px; color: var(--dim); font-weight: 600; }
+  #panel .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  #panel button, #panel select { background: #1a212b; border: 1px solid #2a3340; border-radius: 10px; padding: 8px 11px; font-size: 13.5px; color: var(--ink); }
+  #panel select { width: 100%; }
+  #panel button.on { background: #24406e; border-color: var(--accent); }
+  #panel label { display: inline-flex; gap: 6px; align-items: center; }
+  #panel input[type=range] { width: 100%; }
+  .log { height: 170px; overflow: auto; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--dim); background: #06080b; border-radius: 10px; padding: 8px; white-space: pre-wrap; }
+  .hint { color: #64748a; font-size: 12px; line-height: 1.5; }
+  #startOverlay { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); }
+  #startOverlay .box { background: #11161d; border: 1px solid #263040; border-radius: 18px; padding: 26px 30px; max-width: 520px; text-align: center; }
+  #startOverlay h1 { font-size: 24px; margin: 0 0 8px; }
+  #startOverlay p { color: var(--dim); font-size: 15px; line-height: 1.6; margin: 0 0 18px; }
+  #startOverlay button { background: var(--accent); border-radius: 12px; padding: 12px 20px; font-size: 16px; font-weight: 700; margin: 4px; }
+  #startOverlay button.ghost { background: #1d2530; }
+
+  /* ===== 주차 위치 기억 (목적지 도착 뒤) ===== */
+  #garageCv { position: absolute; left: 0; top: 0; width: 1920px; height: 560px; display: none; }
+  #garageCv.show { display: block; }
+  .pk { position: absolute; inset: 34px 0 74px 0; background: #0a0d12; display: none; padding: 14px 18px; gap: 16px; z-index: 4; }
+  .pk.show { display: flex; }
+  .pk-cam { width: 468px; flex: none; }
+  .pk-cam canvas { width: 468px; height: 263px; border-radius: 12px; background: #000; display: block; }
+  .pk-cap { margin-top: 6px; font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pk-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .pk-head { display: flex; align-items: center; gap: 10px; }
+  .pk-head b { font-size: 19px; }
+  .pk-head span { font-size: 12.5px; color: var(--dim); }
+  .pk-head button { margin-left: auto; display: none; background: var(--accent); border-radius: 10px; padding: 6px 12px; font-size: 14px; font-weight: 700; }
+  .pk-head button.show { display: block; }
+  .pk-est { font-size: 46px; line-height: 1.1; font-weight: 800; letter-spacing: 1px; margin-top: 2px; }
+  .pk-sub { font-size: 13.5px; color: var(--dim); }
+  .pk-status { font-size: 15px; background: var(--card); border-radius: 10px; padding: 7px 11px; }
+  .pk-log { flex: 1; min-height: 0; overflow: hidden; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; color: #b9c2cf; }
+  .pk-log .miss { color: #f5a524; } .pk-log .hit { color: #4fd08f; }
+  .pk-phone-wrap { position: absolute; left: 1250px; top: 18px; width: 300px; display: none; z-index: 2; }
+  .pk-phone-wrap.show { display: block; }
+  .pk-phone { height: 440px; border-radius: 36px; border: 9px solid #000; background: linear-gradient(160deg, #2b3a55, #1a1f2b 60%); position: relative; overflow: hidden; box-shadow: 0 0 0 2px #333, 0 12px 34px rgba(0,0,0,.55); }
+  .pk-clock { text-align: center; font-size: 52px; font-weight: 300; margin-top: 44px; }
+  .pk-date { text-align: center; font-size: 14px; color: #c9d2e0; }
+  .pk-noti { position: absolute; left: 9px; right: 9px; top: 168px; background: rgba(245,247,250,.95); color: #111; border-radius: 16px; padding: 10px 12px; transform: translateY(-26px); opacity: 0; pointer-events: none; transition: all .45s; cursor: pointer; }
+  .pk-noti.show { transform: none; opacity: 1; pointer-events: auto; }
+  .pk-noti small { display: block; font-size: 12px; color: #555; }
+  .pk-noti b { display: block; font-size: 15px; margin-top: 3px; }
+  .pk-noti span { display: block; font-size: 14px; margin-top: 2px; }
+  .pk-detail { position: absolute; inset: 0; background: #f4f6f9; color: #111; padding: 18px 14px; transform: translateY(100%); transition: transform .4s; }
+  .pk-detail.show { transform: none; }
+  .pk-loc { font-size: 32px; font-weight: 800; color: #002c5f; margin-top: 4px; }
+  .pk-where { font-size: 12.5px; color: #555; margin-top: 3px; }
+  .pk-detail img { width: 100%; height: 170px; object-fit: contain; background: #e4e8ee; border-radius: 10px; margin-top: 8px; display: block; }
+  .pk-detail button { margin-top: 8px; width: 100%; padding: 9px; border-radius: 10px; background: #002c5f; color: #fff; font-size: 14px; font-weight: 700; }
+  .pk-phone-cap { margin-top: 7px; text-align: center; font-size: 13px; color: #fff; text-shadow: 0 1px 3px #000; }
+</style>
+</head>
+<body>
+<div id="viewport">
+  <div id="scene">
+    <div class="outside">
+      <canvas id="roadCv" width="1920" height="560"></canvas>
+      <canvas id="garageCv" width="1920" height="560"></canvas>
+      <div class="sign" id="sign"><div class="ko" id="signKo">용인</div><div class="en" id="signEn">Yongin</div></div>
+    </div>
+
+    <div class="dash"></div>
+
+    <div class="cluster">
+      <div class="cl-top"><span id="clTime">12:00</span><span id="clTrip">연속 운전 0분</span></div>
+      <div class="cl-speed"><b id="clSpeed">0</b><span>km/h</span>
+        <div class="cl-gear" id="clGear"><i>P</i><i>R</i><i>N</i><i>D</i></div>
+      </div>
+      <div class="telltales">
+        <span class="tt amber" id="ttDaw" title="운전자 주의 경고">☕</span>
+        <span class="tt" id="ttLamp" title="전조등">💡</span>
+        <span class="tt" id="ttRear" title="뒷좌석 탑승">👥</span>
+      </div>
+      <div class="cl-now" id="clNow">♪ S J Story</div>
+    </div>
+    <div class="wheel"></div>
+
+    <div class="display-frame">
+      <div class="display" id="display">
+        <div class="sbar">
+          <b id="sbTime">12:00</b>
+          <span class="np" id="np"><span class="eq"><i></i><i></i><i></i></span><span id="npText">S J Story</span></span>
+          <span><span id="sound" title="소리 상태">🔊</span> · 📶 5G · 🌡 <span id="outTemp">18</span>°</span>
+        </div>
+        <div class="content">
+          <div class="map">
+            <svg id="mapSvg" viewBox="0 0 455 292" preserveAspectRatio="xMidYMid slice"></svg>
+            <div class="tbt"><span class="arrow">⬆</span><div><div class="t1" id="tbt1">경로 안내 대기</div><div class="t2" id="tbt2">—</div></div></div>
+            <div class="limit" id="limit">100</div>
+            <div class="cur"><b id="curSpeed">0</b> km/h</div>
+          </div>
+          <div class="app">
+            <div class="ahead">
+              <span class="pill" id="pill">🟢 길동무</span>
+              <span class="region" id="region">📍 위치 확인 중</span>
+              <span class="aname">S J Story</span>
+            </div>
+            <div class="story" id="story">
+              <div class="srow">
+                <div class="emoji" id="emoji">😂</div>
+                <div class="ttl"><div class="title" id="title">S J Story</div><div class="status" id="status">시작을 누르면 이야기를 들려드려요</div></div>
+              </div>
+              <div class="subtitle" id="subtitle"></div>
+              <div class="bars" id="bars"></div>
+              <span class="badge" id="badge" style="display:none">창작</span>
+            </div>
+            <div class="voicebar" id="voicebar"><span class="dot"></span><span id="voiceLabel">말로 대답해 주세요</span><span class="heard" id="heard"></span></div>
+            <div class="answers" id="answers">
+              <button id="opt1"><span class="k">1번</span><span></span></button>
+              <button id="opt2"><span class="k">2번</span><span></span></button>
+            </div>
+          </div>
+        </div>
+        <div class="vpick" id="vpick">
+          <div class="vh"><b>🗣 목소리 고르기</b><span id="vpickNote">▶ 눌러서 미리 들어 보고, 마음에 드는 목소리를 고르세요</span><button id="vpickClose">닫기</button></div>
+          <div class="vlist" id="vlist"></div>
+        </div>
+        <div class="pk" id="pkApp">
+          <div class="pk-cam">
+            <canvas id="pkCam" width="640" height="360"></canvas>
+            <div class="pk-cap" id="pkCap"></div>
+          </div>
+          <div class="pk-side">
+            <div class="pk-head"><b>🅿 주차 위치 기억</b><span>시연: 기어와 카메라 영상은 모의 입력</span><button id="pkClose">닫기</button></div>
+            <div class="pk-est" id="pkEst">— · —</div>
+            <div class="pk-sub" id="pkSub"></div>
+            <div class="pk-status" id="pkStatus"></div>
+            <div class="pk-log" id="pkLog"></div>
+          </div>
+        </div>
+        <div class="dock">
+          <span class="ico">🏠</span><span class="ico">🧭</span><span class="ico">🎵</span><span class="ico active">📖</span>
+          <span class="sep"></span>
+          <button class="btn primary" id="startStop">▶ 시작</button>
+          <button class="btn" id="skip">⏭ 다른 거</button>
+          <button class="g" data-genre="COMEDY" title="개그">😂</button>
+          <button class="g" data-genre="SPOOKY" title="오싹한 이야기">👻</button>
+          <button class="g" data-genre="THINK" title="생각하는 이야기">🤔</button>
+          <button class="g" data-genre="LOCAL" title="지역 이야기">🗺️</button>
+          <button class="btn mic" id="micToggle">🎤</button>
+          <button class="btn" id="voiceBtn" title="목소리 고르기">🗣 목소리</button>
+          <div class="clim"><span>운전석</span><b>22.0°</b><span>❄</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="hw"><span class="k hazard">▲</span><span class="k">MAP</span><span class="k">MEDIA</span><span class="knob"></span><span class="k">SETUP</span></div>
+    <div class="pk-phone-wrap" id="pkPhoneWrap">
+      <div class="pk-phone">
+        <div class="pk-clock" id="pkClock">12:00</div>
+        <div class="pk-date" id="pkDate"></div>
+        <div class="pk-noti" id="pkNoti"><small>내 차 앱 · 지금</small><b id="pkNotiTitle"></b><span id="pkNotiBody"></span></div>
+        <div class="pk-detail" id="pkDetail">
+          <div style="font-size:13px;color:#666;font-weight:600">주차한 곳</div>
+          <div class="pk-loc" id="pkLoc"></div>
+          <div class="pk-where" id="pkWhere"></div>
+          <img id="pkImg" alt="주차할 때 빌트인캠이 찍은 기둥 표지 사진">
+          <button id="pkFound">차를 찾았어요</button>
+        </div>
+      </div>
+      <div class="pk-phone-cap">마이현대 앱 연동을 가정한 시연 화면</div>
+    </div>
+  </div>
+</div>
+
+<button id="zoomBtn" style="position:fixed;right:132px;top:14px;z-index:30;background:rgba(20,24,31,.86);border:1px solid #2b3340;border-radius:12px;padding:8px 12px;font-size:14px;color:#f3f5f8">🔍 화면 확대</button>
+<button id="panelBtn">⚙ 시연 패널</button>
+<div id="soundWarn" style="display:none;position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:35;background:#3a1d12;border:1px solid #f0952a;color:#ffd9b8;border-radius:12px;padding:10px 16px;font-size:14px">⚠ 소리가 나지 않아요. 탭 음소거·컴퓨터 볼륨·출력 장치를 확인하고, ⚙ 시연 패널의 🔊 목소리 들어 보기를 눌러 주세요.</div>
+<aside id="panel">
+  <h3>시연 주행</h3>
+  <div class="row"><select id="routeSelect">
+    <option value="yeongdong">영동고속도로 · 서울 → 강릉</option>
+    <option value="national">국도 · 원주 → 제천 → 영월 (유배지)</option>
+  </select></div>
+  <div class="row"><select id="sceneSelect">
+    <option value="auto">도로 풍경: 경로에 맞춰 (고속도로 / 국도는 시내)</option>
+    <option value="highway">도로 풍경: 고속도로</option>
+    <option value="town">도로 풍경: 시내 · 국도 (인도·사람·건물)</option>
+  </select></div>
+  <div class="row"><button id="demoStart">🚗 데모 주행 시작</button><button id="demoNext">⏩ 다음 지역</button></div>
+  <div class="row"><button id="night">🌙 밤</button><button id="rear">👥 뒷좌석 탑승</button><button id="attention">☕ 차량 졸음 경고</button><button id="plus30">⏱ +30분</button></div>
+  <div class="row"><button id="arrive">🅿 쉼터 도착</button><button id="resume">🚗 다시 출발</button></div>
+  <div class="row"><button id="parkBtn">⏪ 목적지 도착 · 후진 주차</button></div>
+  <div class="hint">경로의 마지막 지역이 끝나면 저절로 시작합니다. 키보드 G로도 바로 시작할 수 있어요.</div>
+
+  <h3>목소리</h3>
+  <div class="row"><select id="recVoiceSelect"></select></div>
+  <div class="hint">컴퓨터 음성 (녹음이 없는 문장에 사용)</div>
+  <div class="row"><select id="voiceSelect"></select></div>
+  <div class="row"><label style="width:100%">말 빠르기 <input type="range" id="rate" min="0.8" max="1.2" step="0.02" value="1"></label></div>
+  <div class="row"><button id="testVoice">🔊 목소리 들어 보기</button><button id="silent">🔇 소리 끄기</button><label><input type="checkbox" id="subs" checked> 시연용 자막</label></div>
+  <div class="hint" id="voiceHint"></div>
+
+  <h3>설정 (실제 차량에서는 정차 중에만)</h3>
+  <div class="row">
+    <label><input type="checkbox" class="pref" value="COMEDY" checked> 😂 개그</label>
+    <label><input type="checkbox" class="pref" value="SPOOKY" checked> 👻 오싹</label>
+    <label><input type="checkbox" class="pref" value="THINK" checked> 🤔 생각</label>
+    <label><input type="checkbox" class="pref" value="LOCAL" checked> 🗺️ 지역</label>
+  </div>
+  <div class="row"><label><input type="checkbox" id="family"> 가족 모드 (오싹한 이야기 숨김)</label></div>
+  <div class="row"><label><input type="checkbox" id="keepListening"> 휴식 안내 중에도 이야기 이어 듣기 (결말은 10~15km 뒤)</label></div>
+  <div class="row"><select id="pace"><option value="demo" selected>이야기 간격: 시연용 (짧게)</option><option value="real">이야기 간격: 실제 (길동무 2분)</option></select></div>
+
+  <h3>진행 기록</h3>
+  <div class="log" id="log"></div>
+  <p class="hint">대답은 말로 합니다 (🎤 Chrome, 마이크 허용). 시연자 키보드: 1 / 2 / Y = 운전자가 "1번·2번·네"라고 말한 것으로 처리 · V = "목소리 바꿔" · Space 시작/그만 · N 다음 지역 · G 후진 주차 · Z 화면 확대 · P 패널 · F 전체 화면</p>
+</aside>
+
+<div id="startOverlay">
+  <div class="box">
+    <h1>S J Story · 차량 화면 시뮬레이터</h1>
+    <p>Pleos Connect 차량 중앙 화면에서 동작하는 모습을 재현합니다.<br><b>주행 중에는 화면을 누르지 않고 말로 대답합니다.</b> "1번", "2번", "네", "아니요", "그만"<br>출발하면 마이크 사용을 허용해 주세요. (시연자는 키보드 1·2·Y로 대신 입력)<br>오른쪽 위 ⚙ 시연 패널에서 밤, 졸음 경고, 쉼터 도착 같은 상황을 만들 수 있어요.</p>
+    <button id="goYeongdong">🚗 영동고속도로 출발</button>
+    <button id="goNational" class="ghost">국도 · 영월 방향</button>
+    <div style="margin-top:12px"><button id="goVoice" class="ghost">🗣 목소리 먼저 고르기</button> <span id="startVoice" style="color:#8e9aac;font-size:14px"></span></div>
+  </div>
+</div>
+
+<script>
+const STORIES = /*__STORIES__*/[];
+
+// ---------------- 경로 (시연용) ----------------
+// 쉼터 이름은 실제 휴게소 이름, 거리는 시연용 값입니다.
+const ROUTES = /*__ROUTES__*/{};
+const P = /*__PHRASES__*/{};
+// 녹음 음성 파일 목록 (audio 폴더). 문장 → 파일. 없으면 컴퓨터 음성으로 읽습니다.
+const AUDIO = /*__AUDIO__*/{};
+// 고를 수 있는 녹음 목소리 (voices.json + audio 폴더)
+const VOICES = /*__VOICES__*/[];
+// 시연용 문장과 미리 듣기 문장은 HTML 안에 직접 넣어 둡니다 (파일을 어떻게 열어도 소리가 나도록)
+const EMBED = /*__EMBED__*/{};
+function savedVoice() { try { return localStorage.getItem("gilstory.voice"); } catch (e) { return null; } }
+function rememberVoice(id) { try { localStorage.setItem("gilstory.voice", id); } catch (e) {} }
+
+const GENRES = {
+  COMEDY: { label: "개그", emoji: "😂" },
+  SPOOKY: { label: "오싹한 이야기", emoji: "👻" },
+  THINK: { label: "생각하는 이야기", emoji: "🤔" },
+  LOCAL: { label: "지역 이야기", emoji: "🗺️" },
+};
+const ROTATION = ["COMEDY", "THINK", "LOCAL", "SPOOKY"];
+
+// ---------------- 상태 ----------------
+const S = {
+  running: false, busy: false, flow: 0,
+  minutes: 0, extraMinutes: 0, baseline: 0, attention: false,
+  night: false, rear: false, family: false, spookyOk: false, preferred: new Set(Object.keys(GENRES)),
+  override: null, genre: null, region: null, regionFresh: false, nightPromptPending: false,
+  played: new Set(), lastEnd: 0, restOffered: false, restRetryAt: 0, restStop: null, waypoint: false,
+  resting: false, activeStory: null, savedStory: null, restHold: false, offerAfter: 0, pending: null,
+  // 이어 듣기: 휴식 안내 뒤에도 이야기를 이어 가고, 듣던 이야기의 결말은 10~15km 뒤에 들려줍니다
+  keepListening: false, continueStarted: false, savedChoice: null, endingAtKm: null, endingNoticeKm: null,
+  routeKey: "yeongdong", legIndex: -1, demo: false, parked: true, silent: false, mic: true, speaking: false, heard: "", micError: null, voice: "SYSTEM", clipFail: false,
+  title: null, status: "시작을 누르면 이야기를 들려드려요", subtitle: "", parts: 0, partIndex: -1, fiction: false,
+  // 목적지 도착 뒤 주차 중이면 { gear, speed }. 이야기와 휴식 안내는 이때 나오지 않습니다
+  garage: null,
+};
+const PACE = {
+  demo: { companion: 6000, wake: 4000, rest: 5000, listen: 8000, retryRest: 60000 },
+  real: { companion: 120000, wake: 45000, rest: 60000, listen: 8000, retryRest: 600000 },
+};
+let pace = PACE.demo;
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+
+// ---------------- 규칙 (앱의 core 패키지와 같은 규칙) ----------------
+function effMinutes() { return Math.max(0, S.minutes + S.extraMinutes - S.baseline); }
+function hour() { return S.night ? 23 : new Date().getHours(); }
+function score() {
+  const m = effMinutes(); let s = 0;
+  if (m >= 120) s += 80; else if (m >= 90) s += 40 + Math.floor((m - 90) * 4 / 3); else if (m >= 60) s += 20;
+  const h = hour(); if (h >= 2 && h <= 5) s += 25; if (h >= 14 && h <= 15) s += 10;
+  return s;
+}
+function stage() {
+  if (S.attention || S.restHold) return "REST";
+  const s = score(); return s >= 80 ? "REST" : s >= 40 ? "WAKE" : "COMPANION";
+}
+function allowed(ignoreRear = false) {
+  const set = new Set(S.preferred.size ? S.preferred : Object.keys(GENRES));
+  if (S.family) set.delete("SPOOKY");
+  if (!ignoreRear && S.rear && !S.spookyOk) set.delete("SPOOKY");
+  if (!set.size) set.add("LOCAL");
+  return set;
+}
+function recommended() {
+  const a = allowed();
+  if (S.override && a.has(S.override)) return S.override;
+  const byTime = S.night ? "SPOOKY" : "COMEDY";
+  return a.has(byTime) ? byTime : a.has("LOCAL") ? "LOCAL" : [...a][0];
+}
+function rotate(g) {
+  const a = allowed(); const i = ROTATION.indexOf(g);
+  for (let k = 1; k <= ROTATION.length; k++) { const n = ROTATION[(i + k) % ROTATION.length]; if (a.has(n)) return n; }
+  return g;
+}
+function needsPassengerCheck(g) { return g === "SPOOKY" && S.rear && !S.spookyOk && !S.family; }
+function nextStory(genre, needInteraction) {
+  const c = STORIES.filter(s => s.genre === genre && !S.played.has(s.id) && (!needInteraction || s.interaction));
+  return c.find(s => S.region && s.region === S.region) || c.find(s => !s.region) || null;
+}
+function hasRegional(genre) { return !!S.region && STORIES.some(s => s.genre === genre && s.region === S.region && !S.played.has(s.id)); }
+function findStory(genre, needInteraction) {
+  const order = [genre]; let g = genre;
+  for (let i = 0; i < 4; i++) { g = rotate(g); if (!order.includes(g)) order.push(g); }
+  for (const req of needInteraction ? [true, false] : [false]) for (const cand of order) { const s = nextStory(cand, req); if (s) return s; }
+  return null;
+}
+
+// ---------------- 대답 인식 ----------------
+const W = {
+  stop: ["그만", "멈춰", "꺼 줘", "꺼줘", "조용"], skip: ["다른 거", "다른거", "다음", "넘겨", "패스"],
+  yes: ["응", "어", "네", "예", "그래", "좋아", "추가", "콜", "오케이"], no: ["아니", "싫어", "괜찮아", "됐어", "안 해", "안해", "노"],
+  first: ["1번", "일번", "첫 번째", "첫번째", "하나", "1"], second: ["2번", "두 번째", "두번째", "둘", "2"],
+  genre: { COMEDY: ["웃긴", "개그", "재밌는", "재미있는"], SPOOKY: ["무서운", "오싹", "공포", "괴담"], THINK: ["생각", "철학", "진지한"], LOCAL: ["지역", "동네", "여기 얘기", "여기 이야기"] },
+};
+// "남자 목소리", "차분한 목소리", "목소리 바꿔" → 바꿀 목소리 (목소리·음성이라는 말이 있을 때만)
+function voiceFromWords(text) {
+  if (!/(목소리|음성)/.test(text)) return null;
+  // "목소리 바꿔"는 녹음 목소리끼리만 돌립니다 (컴퓨터 음성은 "컴퓨터 목소리"라고 할 때만)
+  const order = [...VOICES.map(v => v.id), "SYSTEM"], recorded = VOICES.length ? VOICES.map(v => v.id) : order;
+  const next = () => recorded[(recorded.indexOf(S.voice) + 1) % recorded.length];
+  let id = /중후|낮은|굵은/.test(text) ? "M2" : /차분/.test(text) ? "F3" : /부드러운/.test(text) ? "M1" : /밝은/.test(text) ? "F2"
+    : /남자|남성/.test(text) ? (S.voice === "M1" ? "M2" : "M1") : /여자|여성/.test(text) ? (S.voice === "F2" ? "F3" : "F2")
+    : /컴퓨터|기계/.test(text) ? "SYSTEM" : /바꿔|바꾸|다른|다음/.test(text) ? next() : null;
+  if (id && !order.includes(id)) id = next();
+  return id;
+}
+function parse(raw, options = []) {
+  if (raw == null) return { t: "unknown" };
+  const text = String(raw).trim().replace(/[.?!,]/g, "");
+  if (!text) return { t: "unknown" };
+  if (options[0] === "네" && options[1] === "아니요") {
+    const exact = text.replace(/\s+/g, "");
+    if (["네","예","응","그래","좋아","추가해줘","1번","일번","1"].includes(exact)) return { t: "yes" };
+    if (["아니요","아니","싫어","괜찮아","2번","이번","2"].includes(exact)) return { t: "no" };
+    return { t: ["그만","멈춰"].includes(exact) ? "stop" : "unknown" };
+  }
+  if (W.stop.some(w => text.includes(w))) return { t: "stop" };
+  const vid = voiceFromWords(text);
+  if (vid) return { t: "voice", id: vid };
+  for (const [g, ws] of Object.entries(W.genre)) if (ws.some(w => text.includes(w))) return { t: "genre", g };
+  if (W.skip.some(w => text.includes(w))) return { t: "skip" };
+  for (let i = 0; i < options.length; i++) if (options[i] && text.includes(options[i].trim())) return { t: "opt", i };
+  const num = ws => ws.some(w => w.length === 1 ? text === w : text.includes(w));
+  if (num(W.second)) return { t: "opt", i: 1 };
+  if (num(W.first)) return { t: "opt", i: 0 };
+  if (W.no.some(w => text.startsWith(w) || text === w)) return { t: "no" };
+  if (W.yes.some(w => text.startsWith(w) || text === w)) return { t: "yes" };
+  return { t: "unknown" };
+}
+
+// ---------------- 자연스러운 낭독 ----------------
+// 1) 직접 녹음한 음성 파일이 있으면 그 파일을 재생합니다. audio 폴더 + build_simulator.py
+// 2) 없으면 컴퓨터 음성으로 읽되, 문장 단위로 나눠 사람처럼 숨을 쉬고 장르마다 말투를 바꿉니다.
+// 3) 안내 문구는 매번 조금씩 다른 말로 시작합니다 (phrases.json).
+const STYLE = {
+  LOCAL:  { rate: 0.95, pitch: 0.99, pause: 1.15 },
+  COMEDY: { rate: 1.0,  pitch: 1.05, pause: 1.0 },
+  SPOOKY: { rate: 0.86, pitch: 0.93, pause: 1.7 },
+  THINK:  { rate: 0.9,  pitch: 0.97, pause: 1.45 },
+  SYSTEM: { rate: 0.97, pitch: 1.0,  pause: 1.05 },
+};
+const fill = (t, v) => t.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? "");
+let voices = [], koVoice = null, userRate = 1;
+function voiceScore(v) {
+  let s = 0;
+  if (/premium|프리미엄/i.test(v.name)) s += 50;
+  if (/enhanced|향상|고급|natural|neural/i.test(v.name)) s += 40;
+  if (/google/i.test(v.name)) s += 10; // 네트워크 음성은 파일로 열면 소리 없이 실패할 때가 있어 뒤로
+  if (/yuna|유나|sora|소라|jian|heami|sunhi|선희|injoon/i.test(v.name)) s += 20;
+  if (/eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley/i.test(v.name)) s -= 30; // 효과용 음성
+  if (v.localService) s += 15;
+  return s;
+}
+function loadVoices() {
+  const clips = Object.keys(AUDIO[S.voice] || {}).length;
+  if (!("speechSynthesis" in window)) return;
+  voices = speechSynthesis.getVoices().filter(v => v.lang && v.lang.replace("_", "-").toLowerCase().startsWith("ko"));
+  voices.sort((a, b) => voiceScore(b) - voiceScore(a));
+  const sel = $("voiceSelect"); const keep = sel.value;
+  sel.innerHTML = voices.map((v, i) => `<option value="${i}">${v.name}${i === 0 ? " (추천)" : ""}</option>`).join("") || "<option>한국어 음성 없음</option>";
+  if (keep && voices[+keep]) sel.value = keep;
+  koVoice = voices[+sel.value] || voices[0] || null;
+  const best = voices[0] ? voiceScore(voices[0]) : -1;
+  $("voiceHint").textContent = (clips ? `'${voiceName(S.voice)}' 녹음 ${clips}문장을 재생해요. 녹음이 없는 문장만 컴퓨터 음성으로 읽어요. ` : "컴퓨터 음성으로 읽어요. ")
+    + (!voices.length ? "한국어 컴퓨터 음성이 없어요."
+      : best < 40 ? "컴퓨터 음성을 더 자연스럽게: macOS 시스템 설정 → 손쉬운 사용 → 읽기 및 말하기 → 시스템 음성에서 '유나(프리미엄)' 내려받기." : "");
+}
+function sentences(text) {
+  const out = [];
+  for (const s of text.replace(/\s+/g, " ").trim().split(/(?<=[.?!…])\s+/)) {
+    if (s.length <= 70) { out.push(s); continue; }
+    // 긴 문장은 쉼표에서 한 번 더 나눠 숨 쉴 틈을 줍니다
+    let buf = "";
+    for (const piece of s.split(/(?<=,)\s+/)) {
+      if ((buf + " " + piece).trim().length > 55 && buf) { out.push(buf.trim()); buf = piece; } else buf = (buf + " " + piece).trim();
+    }
+    if (buf) out.push(buf.trim());
+  }
+  return out.filter(Boolean);
+}
+function pauseAfter(s, style) {
+  const base = /\?$/.test(s) ? 560 : /[.!…]$/.test(s) ? 420 : 200;
+  return base * style.pause;
+}
+// 녹음 파일 이름 = 문장의 FNV-1a 해시 (make_script.py와 같은 계산)
+function audioKey(text) {
+  let h = 0x811c9dc5;
+  for (const ch of text.normalize("NFC").trim()) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, "0");
+}
+let speakTimer = null, currentDone = null, liveUtterance = null, liveAudio = null, audioOk = null, failedVoices = new Set();
+function wait(ms, flow) { return new Promise(r => { speakTimer = setTimeout(() => r(flow === S.flow), ms); currentDone = () => { clearTimeout(speakTimer); r(flow === S.flow); }; }); }
+// 결과: "ok"(끝까지 재생) · "stop"(멈춤) · "fail"(파일을 못 찾음 → 컴퓨터 음성으로 대신 읽기)
+let clipFailNotified = false;
+function playClip(path, flow) {
+  return new Promise(resolve => {
+    let finished = false;
+    const a = new Audio(path); liveAudio = a;
+    const end = (how) => { if (finished) return; finished = true; if (currentDone === stopNow) currentDone = null; resolve(how); };
+    const stopNow = () => { a.pause(); end("stop"); };
+    currentDone = stopNow;
+    a.onended = () => end(flow === S.flow ? "ok" : "stop");
+    a.onerror = () => {
+      if (!path.startsWith("data:")) {
+        S.clipFail = true; render();
+        if (!clipFailNotified) { clipFailNotified = true; log("⚠ 녹음 파일을 열 수 없어요 (" + path + "). start.command로 열면 모든 문장이 녹음 목소리로 나와요. 지금은 컴퓨터 음성으로 대신 읽어요."); }
+      }
+      end("fail");
+    };
+    a.play().then(() => { if (audioOk !== true) { audioOk = true; render(); } }).catch(e => { if (e.name === "NotAllowedError") { audioOk = false; render(); log("⚠ 브라우저가 소리 재생을 막았어요: 화면을 한 번 누른 뒤 다시 시도해 주세요."); end("stop"); } });
+  });
+}
+// 이 목소리로 이 문장의 녹음이 있으면 경로 (HTML 안에 넣은 시연용 녹음 → audio 폴더 순서)
+function clipFor(voice, text) {
+  const k = audioKey(text);
+  return (EMBED[voice] && EMBED[voice][k]) || (!S.clipFail && AUDIO[voice] && AUDIO[voice][k]) || null;
+}
+function sayOne(text, style, flow) {
+  return new Promise(resolve => {
+    let finished = false;
+    const done = () => { if (finished) return; finished = true; clearTimeout(speakTimer); if (currentDone === done) currentDone = null; resolve(flow === S.flow); };
+    currentDone = done;
+    const estimate = Math.min(20000, Math.max(900, text.length * 130 / (style.rate * userRate)));
+    if (S.silent || !koVoice) { speakTimer = setTimeout(done, S.silent ? Math.min(estimate, 1200) : estimate); return; }
+    const u = new SpeechSynthesisUtterance(text);
+    liveUtterance = u; // Chrome에서 참조가 없으면 중간에 소리가 끊기는 문제 방지
+    u.voice = koVoice; u.lang = "ko-KR"; u.rate = style.rate * userRate; u.pitch = style.pitch;
+    let started = false;
+    u.onstart = () => { started = true; if (audioOk !== true) { audioOk = true; render(); } };
+    u.onend = done;
+    u.onerror = e => {
+      // 이 창이 끊지 않았는데 끊겼다면, 다른 창(다른 주소의 시뮬레이터 등)이 컴퓨터 음성을 가져간 것입니다.
+      // 이어서 다음 문장을 읽으면 그 창을 다시 끊게 되므로, 이 창이 멈춥니다.
+      if ((e.error === "interrupted" || e.error === "canceled") && performance.now() - selfCancelAt > 400 && flow === S.flow) {
+        finished = true; clearTimeout(speakTimer); if (currentDone === done) currentDone = null;
+        haltForOtherTab("다른 창이 컴퓨터 음성을 사용해서, 이 창은 멈췄어요.");
+        resolve(false); return;
+      }
+      if (e.error !== "interrupted" && e.error !== "canceled") {
+        log(`⚠ 음성 오류(${e.error}) · ${koVoice ? koVoice.name : ""}`);
+        if (koVoice) failedVoices.add(koVoice.name);
+        const alt = voices.find(v => !failedVoices.has(v.name) && voiceScore(v) > -10);
+        if (alt) { koVoice = alt; $("voiceSelect").value = String(voices.indexOf(alt)); log(`↻ 다른 음성으로 바꿈: ${alt.name}`); }
+      }
+      done();
+    };
+    speechSynthesis.resume();
+    speechSynthesis.speak(u);
+    // 2.5초가 지나도 소리가 시작되지 않으면 화면에 알립니다
+    setTimeout(() => { if (!started && !finished && !S.silent) { audioOk = false; render(); log("⚠ 소리가 시작되지 않아요. 브라우저 탭 음소거, 컴퓨터 볼륨, 출력 장치를 확인해 주세요."); } }, 2500);
+    speakTimer = setTimeout(done, estimate * 2 + 3000); // 음성 엔진이 끝 신호를 안 줄 때 대비
+  });
+}
+// 한 문장(또는 한 덩어리)을 말합니다. 녹음 파일이 있으면 파일, 없으면 컴퓨터 음성.
+async function speak(text, flow, styleKey = "SYSTEM") {
+  text = (text || "").trim();
+  if (!text) return flow === S.flow;
+  if (flow !== S.flow) return false;
+  // 한 번에 한 목소리만: 앞서 나오던 소리(미리 듣기, 이전 이야기)는 어떤 버튼으로 시작했든 끊고 시작합니다
+  if (S.speaking || (liveAudio && !liveAudio.paused) || ("speechSynthesis" in window && speechSynthesis.speaking)) stopSpeaking();
+  announcePlaying();
+  log("🔊 " + text);
+  const style = STYLE[styleKey] || STYLE.SYSTEM;
+  let ok;
+  for (;;) {
+    S.speaking = true; S.voiceRestart = false; render();
+    const clip = clipFor(S.voice, text);
+    let how = "fail";
+    if (clip && !S.silent) {
+      how = await playClip(clip, flow);
+      ok = how === "ok";
+    }
+    if (how === "fail") {
+      if ("speechSynthesis" in window && (speechSynthesis.speaking || speechSynthesis.pending)) { selfCancelAt = performance.now(); speechSynthesis.cancel(); }
+      ok = true;
+      const list = sentences(text);
+      for (let i = 0; i < list.length && ok && !S.voiceRestart; i++) {
+        ok = await sayOne(list[i], style, flow);
+        if (ok && !S.voiceRestart && i < list.length - 1) ok = await wait(pauseAfter(list[i], style) * (S.silent ? 0.3 : 1), flow);
+      }
+    }
+    // 읽는 도중 목소리를 바꾸면, 지금 문장을 새 목소리로 처음부터 다시 읽습니다
+    if (S.voiceRestart && flow === S.flow) continue;
+    break;
+  }
+  if (flow !== S.flow) return false;
+  S.voiceRestart = false; S.speaking = false; render();
+  return ok && flow === S.flow;
+}
+// 여러 문장을 차례로, 사이에 자연스럽게 쉬면서
+async function speakSeq(list, flow, styleKey = "SYSTEM") {
+  const items = list.map(t => (t || "").trim()).filter(Boolean);
+  const style = STYLE[styleKey] || STYLE.SYSTEM;
+  for (let i = 0; i < items.length; i++) {
+    if (!(await speak(items[i], flow, styleKey))) return false;
+    if (i < items.length - 1 && !(await wait(pauseAfter(items[i], style) * (S.silent ? 0.3 : 1), flow))) return false;
+  }
+  return flow === S.flow;
+}
+function stopSpeaking() { clearTimeout(speakTimer); selfCancelAt = performance.now(); if ("speechSynthesis" in window) speechSynthesis.cancel(); if (liveAudio) liveAudio.pause(); if (currentDone) currentDone(); S.speaking = false; }
+
+// ---------------- 여러 창을 열었을 때 ----------------
+// 같은 주소로 연 창끼리는 서로 알려서, 한 창이 말하기 시작하면 다른 창은 조용히 멈춥니다.
+// (그래서 "그만"을 한 번만 눌러도 소리가 모두 멈춥니다)
+const TAB_ID = Math.random().toString(36).slice(2);
+const tabs = "BroadcastChannel" in window ? new BroadcastChannel("gilstory-audio") : null;
+let selfCancelAt = 0;
+function announcePlaying() { if (tabs) tabs.postMessage({ type: "playing", tab: TAB_ID }); }
+// 다른 창 때문에 멈출 때는 경고 문구도 말하지 않습니다 (말하면 그 창을 다시 멈추게 되므로)
+function haltForOtherTab(reason) {
+  if (!S.running && !S.speaking && !S.demo && !S.busy) return;
+  S.demo = false; clearTimeout(legTimer); clearTimeout(arriveTimer);
+  S.running = false; cancelFlow(); S.status = "다른 창에서 재생 중이라 멈췄어요"; render();
+  log("⏸ " + reason);
+}
+if (tabs) tabs.onmessage = e => {
+  if (e.data && e.data.type === "playing" && e.data.tab !== TAB_ID) haltForOtherTab("다른 창에서 S J Story가 말하기 시작해서, 소리가 겹치지 않게 이 창은 멈췄어요.");
+};
+
+// ---------------- 음성 대답 (STT) ----------------
+// 주행 중에는 화면을 누르지 않고 말로만 대답합니다. 화면 버튼은 정차(P단) 중에만 눌립니다.
+// 시연자는 키보드 1 / 2 로 "운전자가 말한 것"을 대신 넣을 수 있습니다.
+const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+function listen(flow, options) {
+  return new Promise(resolve => {
+    const started = performance.now();
+    let settled = false, ownRec = null;
+    const finishListen = (ans, heard) => {
+      if (settled) return; settled = true;
+      clearTimeout(timer); if (flow === S.flow) { S.pending = null; S.heard = ""; } if (ownRec) { ownRec.onend = ownRec.onresult = ownRec.onerror = null; try { ownRec.abort(); } catch (e) {} if (rec === ownRec) rec = null; }
+      render(); resolve({ ans, heard, delay: performance.now() - started, ok: flow === S.flow });
+    };
+    S.pending = { options, listening: true, answer: (ans) => finishListen(ans, true), cancel: () => finishListen({t:"unknown"}, false) };
+    S.heard = "";
+    const timer = setTimeout(() => finishListen({ t: "unknown" }, !!S.heard), pace.listen);
+    if (S.mic && Rec) {
+      ownRec = rec = new Rec(); rec.lang = "ko-KR"; rec.interimResults = true; rec.maxAlternatives = 3; rec.continuous = false;
+      rec.onresult = e => {
+        const res = e.results[e.results.length - 1];
+        S.heard = res[0].transcript; render();
+        if (res.isFinal) {
+          // 여러 후보 중 알아들을 수 있는 답을 고릅니다
+          let ans = { t: "unknown" };
+          for (let i = 0; i < res.length && ans.t === "unknown"; i++) ans = parse(res[i].transcript, options);
+          log(`🎤 "${res[0].transcript}" → ${ans.t === "opt" ? (ans.i + 1) + "번" : ans.t === "voice" ? "목소리 바꾸기" : ans.t}`);
+          // 목소리 바꾸기는 질문의 대답이 아니므로, 바꾼 뒤 계속 대답을 기다립니다
+          if (ans.t === "voice") { setVoice(ans.id); S.heard = ""; render(); return; }
+          finishListen(ans, true);
+        }
+      };
+      rec.onerror = e => {
+        if (e.error === "no-speech" || e.error === "aborted") return;
+        const first = S.micError !== e.error;
+        S.micError = e.error; render();
+        if (!isParked()) finishListen({t:"unknown"}, false);
+        if (first) log(`⚠ 음성 인식 오류(${e.error}). Chrome에서 start.command로 열고 마이크를 허용해 주세요. 시연자는 키보드 1/2/Y로 대신 입력할 수 있어요.`);
+      };
+      // 말이 없어 인식이 끝나면 대기 시간 안에서 다시 듣습니다 (권한 오류일 때는 다시 시도하지 않음)
+      rec.onend = () => { if (!settled && !S.micError && flow === S.flow && S.pending && performance.now() - started < pace.listen - 800) { try { rec.start(); } catch (e) {} } };
+      try { rec.start(); } catch (e) {}
+    }
+    render();
+  });
+}
+
+// ---------------- 흐름 ----------------
+function begin(label) { S.busy = true; S.flow++; S.status = label; S.parts = 0; S.partIndex = -1; S.subtitle = ""; render(); return S.flow; }
+function finish() {
+  S.busy = false; S.pending = null; S.activeStory = null; S.title = null; S.subtitle = ""; S.parts = 0; S.partIndex = -1; S.fiction = false; S.lastEnd = performance.now();
+  if (S.running) S.status = S.resting ? "쉼터에서 쉬는 중" : S.waypoint ? "내비게이션 안내 중" : S.restHold ? "휴식을 위해 이야기 재생을 멈췄어요" : "다음 이야기를 기다리는 중";
+  render();
+}
+function cancelFlow() {
+  const old = S.pending; S.flow++; S.busy = false; S.activeStory = null; S.pending = null; S.title = null; S.subtitle = ""; S.parts = 0; S.partIndex = -1; S.heard = ""; S.fiction = false;
+  old?.cancel?.(); stopSpeaking(); if (rec) { try { rec.abort(); } catch (e) {} rec = null; }
+}
+
+// 질문을 말하고 대답을 듣습니다. prompts: 차례로 말할 문장들
+async function ask(flow, prompts, options, styleKey = "SYSTEM") {
+  const noMic = () => !S.mic || !Rec || !!S.micError;
+  if (!isParked() && noMic() && !S.restHold) return { ans: null, delay: 0 };
+  S.subtitle = prompts.join(" ");
+  // 질문을 읽는 동안에도 (정차 중 화면 버튼 · 시연자 키보드) 바로 대답할 수 있습니다
+  let early = null;
+  const askedAt = performance.now();
+  S.pending = { options, listening: false, answer: (ans) => { early = ans; S.pending = null; stopSpeaking(); render(); } };
+  render();
+  const spoken = await speakSeq(prompts, flow, styleKey);
+  if (early) return flow === S.flow ? { ans: early, heard: true, delay: performance.now() - askedAt, ok: true } : null;
+  if (flow !== S.flow) return null;
+  S.pending = null;
+  if (!spoken) return null;
+  if (!isParked() && noMic()) return { ans: null, delay: 0 };
+  let r = await listen(flow, options);
+  if (!r.ok) return null;
+  if (r.ans.t === "unknown") {
+    if (S.restHold || !r.heard || noMic()) return { ans: null, delay: r.delay };
+    if (!(await speakSeq([pick(r.heard ? P.retryHeard : P.retrySilent), pick(P.retryAsk)], flow))) return null;
+    r = await listen(flow, options);
+    if (!r.ok) return null;
+    if (r.ans.t === "unknown") return { ans: null, delay: r.delay };
+  }
+  return r;
+}
+const isYes = a => a && (a.t === "yes" || (a.t === "opt" && a.i === 0));
+
+async function playNext() {
+  if (!S.running || S.resting) return;
+  const st = stage();
+  if (restPending(st)) return enterRest();
+  if (S.busy) return;
+  if (S.keepListening && playDeferredEnding()) return;
+  if (S.nightPromptPending) {
+    S.nightPromptPending = false;
+    if (allowed(true).has("SPOOKY") && !S.override) return offerNight();
+  }
+  let g = S.genre || recommended();
+  if (!allowed().has(g) && !needsPassengerCheck(g)) g = recommended();
+  if (S.regionFresh && !S.override && !hasRegional(g)) {
+    const a = allowed();
+    const p = ["LOCAL", recommended(), "COMEDY", "THINK", "SPOOKY"].find(x => a.has(x) && hasRegional(x));
+    if (p) g = p;
+  }
+  S.regionFresh = false;
+  if (needsPassengerCheck(g)) return askPassengers();
+  let story = findStory(g, st !== "COMPANION");
+  if (!story) { S.played.clear(); story = findStory(g, st !== "COMPANION"); }
+  if (!story) return;
+  S.genre = story.genre; S.played.add(story.id);
+  return tell(story);
+}
+
+function regionIntro(story, first) {
+  if (!story.region || story.region !== S.region) return "";
+  const short = story.region.replace(/(시|군|구)$/, "");
+  if (first.includes(short)) return ""; // 첫 문장에 이미 지역 이름이 있으면 생략
+  return fill(pick(P.regionIntro), { r: short });
+}
+
+async function tell(story) {
+  const flow = begin(GENRES[story.genre].emoji + " " + story.title);
+  S.activeStory = story; S.title = story.title; S.fiction = !!story.fiction;
+  const parts = story.parts || [story.text];
+  const intro = [regionIntro(story, parts[0]), story.fiction && !/지어낸|새로 꾸몄|새로 꾸밈|들려드릴게요/.test(parts[0]) ? pick(P.fiction) : ""];
+  S.parts = parts.length;
+  log(`📖 [${GENRES[story.genre].label}] ${story.title}`);
+  for (let i = 0; i < parts.length; i++) {
+    S.partIndex = i; S.subtitle = parts[i]; render();
+    if (!(await speakSeq(i === 0 ? [...intro, parts[i]] : [parts[i]], flow, story.genre))) return;
+    if (i < parts.length - 1 && !(await wait(750 * STYLE[story.genre].pause * (S.silent ? 0.3 : 1), flow))) return; // 문단 사이 쉼
+  }
+  const it = story.interaction;
+  if (!it) return finish();
+  const q = fill(P.question, { q: it.question, o1: it.options[0], o2: it.options[1] });
+  const r = await ask(flow, [pick(P.lead[it.type] || [""]), q], it.options, story.genre === "SPOOKY" ? "SPOOKY" : "SYSTEM");
+  if (!r || flow !== S.flow) return;
+  const a = r.ans;
+  if (!a) return finish();
+  if (a.t === "stop") return stop();
+  if (a.t === "skip") return skip();
+  if (a.t === "genre") return changeGenre(a.g);
+  if (a.t !== "opt") return finish();
+  log(`✔ ${a.i + 1}번 (${(r.delay / 1000).toFixed(1)}초)`);
+  if (S.keepListening && S.restOffered && !S.savedStory && it.type === "CHOICE" && stage() === "REST") {
+    deferEnding(story, a.i); S.endingNoticeKm = null;
+    const line = `좋아요. 결말은 ${Math.max(1, Math.round(S.endingAtKm - odoKm()))}킬로미터쯤 더 달린 뒤에 들려드릴게요.`;
+    S.subtitle = line; render();
+    if (await speak(line, flow, story.genre)) finish();
+    return;
+  }
+  const resp = it.responses[a.i];
+  let lines;
+  if (it.type === "QUIZ") lines = [pick(a.i === it.answer ? P.correct : P.wrong), resp];
+  else lines = [resp];
+  S.subtitle = lines.join(" "); render();
+  if (await speakSeq(lines, flow, story.genre)) finish();
+}
+
+// 쉬어 가기(기본)는 휴식 안내 동안 이야기를 멈추고, 이어 듣기는 쉼터 안내를 한 번 한 뒤 이야기를 이어 갑니다
+function restPending(st) { return S.restHold || st === "REST" && (S.attention || !S.keepListening || !S.restOffered); }
+function enterRest() {
+  if (S.garage) return;
+  if (!S.running || S.resting) return;
+  if (S.keepListening && !S.attention && !S.restHold) {
+    if (S.restOffered) return;
+    if (!S.continueStarted) {
+      S.continueStarted = true;
+      if (!S.savedStory && S.activeStory) deferEnding(S.activeStory, null);
+      cancelFlow();
+      S.offerAfter = performance.now() + (S.attention ? 1500 : 0);
+      S.status = "휴식 안내"; log("⏸ 휴식 안내 (이어 듣기: 결말은 10~15km 뒤)"); render();
+    }
+    if (performance.now() >= S.offerAfter) return offerRest();
+    return;
+  }
+  if (!S.restHold) {
+    if (S.activeStory) { S.savedStory = S.activeStory; S.savedChoice = null; }
+    S.endingAtKm = null; S.endingNoticeKm = null;
+    cancelFlow(); S.restHold = true;
+    S.offerAfter = performance.now() + (S.attention ? 1500 : 0);
+    S.status = "이야기를 멈췄어요 · 휴식 안내"; log("⏸ 재생·질문 중단"); render();
+  }
+  if (!S.restOffered && performance.now() >= S.offerAfter) return offerRest();
+}
+async function offerRest() {
+  const flow = begin("쉼터 안내");
+  S.restOffered = true;
+  const stopInfo = currentRest();
+  S.restStop = stopInfo; render();
+  if (!stopInfo) {
+    if (await speak(pick(P.restNone), flow)) finish();
+    return;
+  }
+  const v = { name: stopInfo.name, kind: stopInfo.kind, km: stopInfo.km };
+  S.title = `🅿 ${stopInfo.name}`;
+  const r = await ask(flow, [pick(S.attention ? P.restReasonWarn : P.restReason), fill(P.restDistance, v), pick(P.restAsk)], ["네", "아니요"]);
+  if (!r || flow !== S.flow) return;
+  const a = r.ans;
+  if (a && a.t === "stop") return stop();
+  if (isYes(a)) {
+    S.status = "내비게이션 반영을 기다리는 중"; log("🧭 경유지 요청 (모의 내비)"); render();
+    // 모의 내비가 반영하기 전에는 핀이나 등록 성공 문구를 표시하지 않습니다.
+    await new Promise(resolve => setTimeout(resolve, 350));
+    if (flow !== S.flow || !S.running) return;
+    S.waypoint = true; log(`🧭 모의 내비 반영: ${stopInfo.name}`); scheduleArrival(); showSign(stopInfo.name, "Rest Area", true);
+    if (await speak(fill(P.restYes, v), flow)) finish();
+  } else {
+    log(a ? "경로 유지 · 휴식 제안 거절" : "경로 유지 · 동의 없음");
+    finish();
+  }
+}
+
+async function offerNight() {
+  const flow = begin("밤 모드 제안");
+  const r = await ask(flow, [pick(P.night)], ["네", "아니요"]);
+  if (!r || flow !== S.flow) return;
+  if (r.ans && r.ans.t === "stop") return stop();
+  if (isYes(r.ans)) { S.genre = "SPOOKY"; S.override = "SPOOKY"; log("👻 오싹한 이야기로 전환"); }
+  finish(); playNext();
+}
+
+async function askPassengers() {
+  const flow = begin("동승자 확인");
+  const r = await ask(flow, [pick(P.passenger)], ["네", "아니요"]);
+  if (!r || flow !== S.flow) return;
+  if (r.ans && r.ans.t === "stop") return stop();
+  if (isYes(r.ans)) S.spookyOk = true;
+  else { S.genre = "LOCAL"; S.override = null; log("👥 동승자 배려: 지역 이야기로 전환"); }
+  finish(); playNext();
+}
+
+// ---------------- 외부 입력 ----------------
+function start() { if (S.running || S.garage) return; S.running = true; S.lastEnd = 0; S.status = "이야기를 준비하고 있어요"; render(); playNext(); }
+function stop() {
+  S.running = false; cancelFlow(); S.status = "이야기를 멈췄어요"; render();
+}
+function skip() { if (S.restHold) return; cancelFlow(); S.lastEnd = 0; render(); if (S.running) playNext(); }
+function changeGenre(g) { if (S.restHold) return; S.genre = g; S.override = g; S.nightPromptPending = false; log(`🎛 장르 선택: ${GENRES[g].label}`); skip(); }
+function submit(ans, source = "touch") {
+  // 주행 중 화면 터치로는 대답하지 않습니다 (시연자 키보드는 '말한 것'으로 처리)
+  if (source === "touch" && !isParked()) { log("✋ 주행 중에는 화면 대신 말로 대답해 주세요"); return; }
+  if (source === "keyboard") log(`⌨ 시연 입력(운전자 음성 대신): ${ans.t === "opt" ? (ans.i + 1) + "번" : ans.t === "voice" ? "\"목소리 바꿔\"" : ans.t}`);
+  if (ans.t === "voice") return setVoice(ans.id); // 질문에 대한 대답으로 치지 않습니다
+  if (S.pending) return S.pending.answer(ans);
+  if (ans.t === "stop") stop(); else if (ans.t === "skip") skip(); else if (ans.t === "genre") changeGenre(ans.g);
+}
+function onRegion(r, en) {
+  if (!r || r === S.region) return;
+  S.region = r; S.regionFresh = true; log(`📍 ${r} 진입`); showSign(r.replace(/(시|군)$/, ""), en || ""); render();
+  if (!S.busy) playNext(); // 이야기 중이면 끊지 않고, 끝난 뒤 이 지역 이야기를 고릅니다
+}
+function setNight(on) { if (on === S.night) return; S.night = on; if (on && S.genre !== "SPOOKY") S.nightPromptPending = true; render(); }
+function setAttention(on) {
+  const changed = on !== S.attention; S.attention = on;
+  if (on && changed) { log("☕ 차량 졸음 경고 (테스트 주입)"); enterRest(); }
+  render();
+}
+async function arrive() {
+  if (!S.waypoint || S.resting) return;
+  clearTimeout(arriveTimer); cancelFlow();
+  // 시연 패널의 도착은 목적 경유지 도착과 P단을 함께 주입합니다.
+  S.resting = true; S.parked = true; S.status = "쉼터에서 쉬는 중"; render();
+  log("🅿 모의 내비 도착 · 기어 P");
+  if (!S.running) return;
+  const story = S.savedStory, flow = begin("쉼터에서 쉬는 중");
+  if (!story) return finish();
+  const r = await ask(flow, [pick(P.arriveEnding)], ["결말 듣기", "조용히 쉬기"]);
+  if (!r || flow !== S.flow || !S.parked) return;
+  if (r.ans?.t === "stop") return stop();
+  const chosen = S.savedChoice; clearSavedEnding();
+  if (!isYes(r.ans)) return finish();
+  return tellEnding(flow, story, chosen, () => S.parked);
+}
+// 미뤄 둔 결말. 선택형 이야기에서 아직 고르지 않았다면 먼저 고르게 합니다
+async function tellEnding(flow, story, chosen, still = () => true) {
+  const it = story.interaction;
+  let ending;
+  if (chosen != null && it) ending = it.responses[chosen];
+  else if (it?.type === "CHOICE") {
+    const choice = await ask(flow, [fill(P.question, {q:it.question, o1:it.options[0], o2:it.options[1]})], it.options);
+    if (!choice || flow !== S.flow || !still()) return;
+    if (choice.ans?.t === "stop") return stop();
+    if (choice.ans?.t !== "opt") return finish();
+    ending = it.responses[choice.ans.i];
+  } else ending = it?.responses[it.answer] || (story.parts || [story.text]).at(-1);
+  S.subtitle = ending; render();
+  if (await speak(ending, flow, story.genre)) finish();
+}
+
+// ---------------- 이어 듣기: 결말을 10~15km 뒤로 미루기 ----------------
+// 지도에서 차가 경로를 따라 달린 거리(km). 실제 앱은 차량 누적 주행 거리를 씁니다.
+function odoKm() { try { return RouteMap ? RouteMap.state().carS : 0; } catch (e) { return 0; } }
+function deferEnding(story, chosen) {
+  // 이야기마다 10~15km 사이에서 정해, 결말이 매번 같은 거리에서 나오지 않게 합니다 (앱과 같은 규칙)
+  let h = 0; for (const c of story.id) h = (h * 31 + c.charCodeAt(0)) | 0;
+  const km = 10 + (((h % 6) + 6) % 6);
+  Object.assign(S, { savedStory: story, savedChoice: chosen, endingAtKm: odoKm() + km, endingNoticeKm: km });
+  log(`⏳ 「${story.title}」 결말은 ${km}km 뒤에`);
+}
+function clearSavedEnding() { Object.assign(S, { savedStory: null, savedChoice: null, endingAtKm: null, endingNoticeKm: null }); }
+function endingDue() { return S.keepListening && !!S.savedStory && !S.resting && S.endingAtKm != null && odoKm() >= S.endingAtKm; }
+function playDeferredEnding() {
+  const story = S.savedStory; if (!story) return false;
+  if (S.endingNoticeKm != null) {
+    const line = `「${story.title}」 결말은 ${S.endingNoticeKm}킬로미터쯤 더 달린 뒤에 들려드릴게요.`;
+    S.endingNoticeKm = null;
+    const flow = begin("결말 예고"); S.subtitle = line; render();
+    speak(line, flow).then(ok => { if (ok) finish(); });
+    return true;
+  }
+  if (!endingDue()) return false;
+  const chosen = S.savedChoice; clearSavedEnding();
+  const flow = begin(GENRES[story.genre].emoji + " " + story.title + " · 결말");
+  S.title = story.title; log(`🎬 「${story.title}」 결말 (${Math.round(odoKm())}km 지점)`); render();
+  speak(`기다리셨죠. 아까 「${story.title}」 결말 들려드릴게요.`, flow).then(ok => { if (ok && flow === S.flow) tellEnding(flow, story, chosen); });
+  return true;
+}
+function resume() {
+  if (!S.resting) return;
+  cancelFlow(); S.resting = false; S.parked = false; S.baseline = S.minutes + S.extraMinutes;
+  S.restOffered = false; S.restHold = false; S.waypoint = false; S.restStop = null; S.attention = false; S.continueStarted = false;
+  clearSavedEnding();
+  log("🚗 다시 출발 · 정차 콘텐츠 종료"); finish();
+}
+
+// ---------------- 시연 주행 ----------------
+let arriveTimer = null, legTimer = null, lastLegAt = 0, signTimer = null;
+function route() { return ROUTES[S.routeKey]; }
+// 차가 서 있는지 (P단): 쉼터에서 쉬는 중이거나 아직 출발 전
+function isParked() { return S.resting || S.parked || S.legIndex < 0; }
+function currentRest() {
+  const leg = route().legs[Math.max(0, S.legIndex)];
+  return leg ? { name: leg.rest, kind: leg.rest.includes("졸음쉼터") ? "졸음쉼터" : "휴게소", km: leg.km } : null;
+}
+function scheduleArrival() { clearTimeout(arriveTimer); if (S.demo) arriveTimer = setTimeout(arrive, 40000); }
+function nextLeg() {
+  if (S.garage) return;
+  const legs = route().legs;
+  if (S.legIndex + 1 >= legs.length) { S.demo = false; log("🏁 목적지 도착"); render(); Parking.start(); return; }
+  S.legIndex++; lastLegAt = performance.now();
+  const leg = legs[S.legIndex];
+  S.minutes = leg.minutes; S.parked = false;
+  if (stage() === "REST") enterRest();
+  onRegion(leg.region, leg.en);
+  render();
+}
+function demoLoop() {
+  clearTimeout(legTimer);
+  if (!S.demo) return;
+  // 이야기가 끝난 뒤에만 다음 지역으로 넘어가서, 이야기가 중간에 끊기지 않게 합니다
+  legTimer = setTimeout(() => {
+    if (!S.busy && !S.resting && !S.waypoint && performance.now() - lastLegAt >= 15000) nextLeg(); // 경유지로 가는 중에는 다음 지역으로 넘어가지 않습니다
+    demoLoop();
+  }, 1000);
+}
+function startDemo(key) {
+  if (S.garage) Parking.leave();
+  clearTimeout(arriveTimer); cancelFlow();
+  Object.assign(S, { running: false, minutes: 0, extraMinutes: 0, baseline: 0, restHold: false, savedStory: null, restStop: null, nightPromptPending: false, override: null, genre: null, region: null,
+    played: new Set(), restOffered: false, restRetryAt: 0, waypoint: false, resting: false, pendingEnding: null, legIndex: -1, demo: true, attention: false, spookyOk: false,
+    continueStarted: false, savedChoice: null, endingAtKm: null, endingNoticeKm: null });
+  S.routeKey = key || $("routeSelect").value; $("routeSelect").value = S.routeKey;
+  log(`🚗 데모 주행 시작: ${route().name}`);
+  nextLeg(); start(); demoLoop(); render();
+}
+function showSign(ko, en, rest = false) {
+  $("signKo").textContent = ko; $("signEn").textContent = en;
+  $("sign").classList.toggle("rest", rest); $("sign").classList.add("show");
+  clearTimeout(signTimer); signTimer = setTimeout(() => $("sign").classList.remove("show"), 6000);
+}
+
+// ---------------- 지도 ----------------
+// 층(레이어)을 차례로 쌓습니다: 바다 → 우리나라 땅(시·도 경계, Natural Earth) → 도시 이름
+// → 경로선(지나온 길 · 남은 길 · 경유지까지 길) → 선 속 방향 화살표 → 출발·도착·쉼터 표시 → 내 차
+const KOREA = /*__KOREA__*/{};
+let RouteMap = null; // 화면 준비가 끝난 뒤 makeRouteMap()으로 만듭니다
+function makeRouteMap() {
+  const svg = $("mapSvg");
+  const W = svg.parentNode.offsetWidth || 455, H = svg.parentNode.offsetHeight || 322;
+  const BOX = { l: 22, r: W - 22, t: 80, b: H - 66 }; // 위쪽 길 안내 띠, 아래쪽 제한속도·속도 표시를 피한 영역
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  // 경도·위도 → km (지도 중심 위도 기준 등장방형 투영)
+  const KX = 111.32 * Math.cos(36.5 * Math.PI / 180), KY = 110.57;
+  const wx = p => (p[0] - 127.5) * KX, wy = p => -(p[1] - 36.5) * KY;
+  const ringD = r => r.map((p, i) => (i ? "L" : "M") + wx(p).toFixed(1) + " " + wy(p).toFixed(1)).join("") + "Z";
+  // 이름, 경도, 위도, 보이기 시작하는 확대 단계 (0: 전국 보기부터)
+  const CITIES = [["서울", 126.98, 37.57, 0], ["강릉", 128.90, 37.75, 0], ["대전", 127.38, 36.35, 0], ["대구", 128.60, 35.87, 0],
+    ["광주", 126.85, 35.16, 0], ["부산", 129.08, 35.18, 0], ["제주", 126.53, 33.50, 0], ["춘천", 127.73, 37.88, 0],
+    ["인천", 126.70, 37.46, 1], ["원주", 127.92, 37.34, 1], ["청주", 127.49, 36.64, 1], ["전주", 127.15, 35.82, 1],
+    ["울산", 129.31, 35.54, 1], ["포항", 129.36, 36.02, 1], ["안동", 128.73, 36.57, 1], ["속초", 128.59, 38.21, 1], ["충주", 127.93, 36.99, 1],
+    ["수원", 127.01, 37.27, 2], ["용인", 127.18, 37.22, 2], ["이천", 127.44, 37.28, 2], ["여주", 127.64, 37.30, 2], ["횡성", 127.98, 37.49, 2],
+    ["평창", 128.39, 37.37, 2], ["제천", 128.19, 37.13, 2], ["영월", 128.46, 37.18, 2], ["동해", 129.11, 37.52, 2], ["홍천", 127.89, 37.70, 2]];
+  const KOREA_BOUNDS = [[125.0, 33.15], [129.6, 38.62]];
+  svg.innerHTML = `
+    <rect id="mSea" width="${W}" height="${H}"/>
+    <g id="mCam">
+      <g id="mOther">${(KOREA.others || []).map(o => `<path d="${o.rings.map(ringD).join("")}"/>`).join("")}</g>
+      <g id="mLand">${(KOREA.provinces || []).map(p => `<path d="${p.rings.map(ringD).join("")}"/>`).join("")}</g>
+    </g>
+    <g id="mLabels"></g><g id="mRoute"></g><g id="mArrows"></g><g id="mStops"></g><g id="mCar"></g><g id="mCallout"></g>
+    <text id="mCredit" x="${W - 8}" y="${H - 7}" text-anchor="end">지도 데이터 Natural Earth</text>`;
+  const el = id => svg.querySelector("#" + id);
+  const cam = { x: 0, y: 0, s: 0 };
+
+  // 경로 모양: 꼭짓점(km)과 처음부터 잰 거리
+  const geoCache = {};
+  function geo(key) {
+    if (geoCache[key]) return geoCache[key];
+    const r = ROUTES[key], pts = (r.path || r.legs.map(l => l.at)).map(p => [wx(p), wy(p)]);
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    const sOf = p => { // 경로에서 가장 가까운 꼭짓점까지의 거리
+      const q = [wx(p), wy(p)]; let best = 0, bd = Infinity;
+      pts.forEach((v, i) => { const d = Math.hypot(v[0] - q[0], v[1] - q[1]); if (d < bd) { bd = d; best = i; } });
+      return cum[best];
+    };
+    return (geoCache[key] = { pts, cum, total: cum[cum.length - 1], legS: r.legs.map(l => sOf(l.at)), restS: r.legs.map(l => sOf(l.restAt)) });
+  }
+  function pointAt(g, s) {
+    s = Math.max(0, Math.min(g.total, s));
+    let i = 1; while (i < g.cum.length - 1 && g.cum[i] < s) i++;
+    const a = g.pts[i - 1], b = g.pts[i], f = (s - g.cum[i - 1]) / ((g.cum[i] - g.cum[i - 1]) || 1);
+    return { x: a[0] + (b[0] - a[0]) * f, y: a[1] + (b[1] - a[1]) * f, ang: Math.atan2(b[1] - a[1], b[0] - a[0]) };
+  }
+  function slice(g, s0, s1) { // s0~s1 구간의 꼭짓점들
+    if (s1 <= s0) return [];
+    const out = [pointAt(g, s0)];
+    g.cum.forEach((c, i) => { if (c > s0 && c < s1) out.push({ x: g.pts[i][0], y: g.pts[i][1] }); });
+    out.push(pointAt(g, s1));
+    return out;
+  }
+  const sx = x => (BOX.l + BOX.r) / 2 + (x - cam.x) * cam.s, sy = y => (BOX.t + BOX.b) / 2 + (y - cam.y) * cam.s;
+  const line = list => list.map((p, i) => (i ? "L" : "M") + sx(p.x).toFixed(1) + " " + sy(p.y).toFixed(1)).join("");
+
+  // 내 차 위치(경로 위 거리), 경유지
+  let carS = 0, lastKey = null, lastLeg = -2, wp = null, floorS = 0;
+  const visited = new Set();
+  function carTarget(g) {
+    const r = route(), now = performance.now();
+    if (S.legIndex < 0) return 0;
+    if (S.garage) return g.total; // 목적지 도착
+    const i = Math.min(S.legIndex, r.legs.length - 1);
+    if (wp && S.resting) return wp.s; // 쉼터에서 쉬는 중
+    const s0 = g.legS[i], s1 = i < r.legs.length - 1 ? g.legS[i + 1] : g.total;
+    let s = s0;
+    if (!S.parked && !S.resting) {
+      let cap = 0.55 * (s1 - s0);
+      const rs = g.restS[i];
+      if (!visited.has(i) && rs > s0 && rs < s1) cap = Math.min(cap, rs - s0 - (r.legs[i].km || 1)); // 아직 안 지난 쉼터는 안내 거리(예: 5km)만큼 앞에 둡니다
+      s += Math.max(0, Math.min(cap, (s1 - s0) * (now - lastLegAt) / 30000));
+    }
+    if (wp && S.waypoint) { // 경유지를 넣으면 도착 안내(40초) 때까지 쉼터로 다가갑니다
+      const f = Math.min(1, (now - wp.at) / 40000);
+      s = Math.max(s, wp.s0 + (wp.s - wp.s0) * f);
+      s = Math.min(s, wp.s);
+    }
+    return Math.max(s, floorS);
+  }
+  function fit(list, minKm) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    list.forEach(p => { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); });
+    const w = Math.max(minKm, x1 - x0), h = Math.max(minKm * 0.6, y1 - y0);
+    return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, s: Math.min((BOX.r - BOX.l) / w, (BOX.b - BOX.t) / h) };
+  }
+  const ease = t => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
+  const bounce = t => { t = Math.max(0, Math.min(1, t)); return t < .6 ? ease(t / .6) * 1.12 : 1.12 - .12 * ease((t - .6) / .4); };
+
+  let lastFrame = 0;
+  function frame() {
+    const key = S.routeKey, r = route(), g = geo(key), now = performance.now();
+    // 화면 갱신 간격과 상관없이 같은 빠르기로 움직이도록, 지난 시간만큼 다가갑니다
+    const dt = Math.min(1000, lastFrame ? now - lastFrame : 33); lastFrame = now;
+    const step = rate => 1 - Math.pow(1 - rate, dt / 33);
+    if (key !== lastKey || S.legIndex < lastLeg) { carS = 0; wp = null; floorS = 0; visited.clear(); lastKey = key; }
+    lastLeg = S.legIndex;
+    // 경유지가 새로 생기거나 없어지는 순간을 잡습니다
+    if (S.waypoint && !wp && S.legIndex >= 0) {
+      const i = Math.min(S.legIndex, r.legs.length - 1);
+      wp = { leg: i, s: Math.max(g.restS[i], carS + 0.5), s0: carS, at: now, name: (S.restStop || currentRest() || {}).name || r.legs[i].rest };
+    } else if (!S.waypoint && wp && !S.resting) {
+      visited.add(wp.leg); floorS = Math.max(floorS, wp.s); wp = null;
+    }
+    const target = carTarget(g);
+    carS += (target - carS) * step(0.05);
+    const car = pointAt(g, carS);
+
+    // 카메라: 출발 전에는 우리나라 전체, 달리는 중에는 경로 전체, 경유지가 있으면 내 차와 경유지를 크게
+    let want;
+    if (S.legIndex < 0 && !S.demo) want = fit(KOREA_BOUNDS.map(p => ({ x: wx(p), y: wy(p) })), 0);
+    else if (wp && !S.resting) { const p = pointAt(g, wp.s); want = fit([car, p, pointAt(g, wp.s + 3)], 18); }
+    else want = fit(g.pts.map(p => ({ x: p[0], y: p[1] })), 40);
+    if (!cam.s) Object.assign(cam, want);
+    const k = step(0.07);
+    cam.x += (want.x - cam.x) * k; cam.y += (want.y - cam.y) * k; cam.s *= Math.pow(want.s / cam.s, k);
+    el("mCam").setAttribute("transform", `translate(${sx(0).toFixed(2)} ${sy(0).toFixed(2)}) scale(${cam.s.toFixed(4)})`);
+
+    // 도시 이름 (겹치면 덜 중요한 이름을 뺍니다)
+    const level = cam.s < 0.9 ? 0 : cam.s < 2 ? 1 : 2, boxes = [];
+    const here = S.legIndex >= 0 ? r.legs[Math.min(S.legIndex, r.legs.length - 1)].region.replace(/(시|군)$/, "") : "";
+    el("mLabels").innerHTML = CITIES.filter(c => c[3] <= level).map(([n, lon, lat]) => {
+      const x = sx(wx([lon, lat])), y = sy(wy([lon, lat])), w = n.length * 12 + 10;
+      if (x < 4 || x > W - 4 || y < 66 || y > H - 4) return "";
+      const b = [x - w / 2, y - 16, x + w / 2, y + 4];
+      if (boxes.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1])) return "";
+      boxes.push(b);
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2"/><text class="${n === here ? "on" : ""}" x="${x.toFixed(1)}" y="${(y - 6).toFixed(1)}" text-anchor="middle">${n}</text>`;
+    }).join("");
+
+    // 경로선: 테두리 → 지나온 길(회색) → 남은 길(파랑) → 경유지까지 길(초록, 그려지는 효과)
+    const all = slice(g, 0, g.total), done = slice(g, 0, carS), left = slice(g, carS, g.total);
+    let wpLine = "";
+    if (wp) {
+      const t = ease((now - wp.at) / 1200), end = carS + (wp.s - carS) * t;
+      if (end > carS + 0.05) wpLine = `<path class="wpglow" d="${line(slice(g, carS, end))}"/><path class="wp" d="${line(slice(g, carS, end))}"/>`;
+    }
+    el("mRoute").innerHTML = `<path class="case" d="${line(all)}"/><path class="done" d="${line(done)}"/><path class="left" d="${line(left)}"/>${wpLine}`;
+
+    // 선 속 방향 화살표: 화면에서 일정한 간격으로, 가는 방향을 향하게
+    const scr = all.map(p => [sx(p.x), sy(p.y)]), gap = 24;
+    let acc = gap / 2, arrows = "";
+    for (let i = 1; i < scr.length; i++) {
+      const [x0, y0] = scr[i - 1], [x1, y1] = scr[i], len = Math.hypot(x1 - x0, y1 - y0), a = Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI;
+      while (acc <= len) {
+        const f = acc / len, x = x0 + (x1 - x0) * f, y = y0 + (y1 - y0) * f;
+        if (x > -6 && x < W + 6 && y > -6 && y < H + 6) arrows += `<path d="M-2.4 -2.8 L1.4 0 L-2.4 2.8" transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${a.toFixed(0)})"/>`;
+        acc += gap;
+      }
+      acc -= len;
+    }
+    el("mArrows").innerHTML = arrows;
+
+    // 출발 · 도착 · 쉼터 · 경유지
+    const st = pointAt(g, 0), en = pointAt(g, g.total);
+    let stops = `<g class="flag start" transform="translate(${sx(st.x).toFixed(1)} ${sy(st.y).toFixed(1)})"><circle r="8"/><text y="3.5">출</text></g>`
+      + `<g class="flag end" transform="translate(${sx(en.x).toFixed(1)} ${sy(en.y).toFixed(1)})"><path d="M0 0 C-3 -6 -9 -9 -9 -15 A9 9 0 1 1 9 -15 C9 -9 3 -6 0 0Z"/><text y="-11.5">도</text></g>`;
+    const offering = S.restStop && !S.waypoint && !S.resting && S.busy;
+    r.legs.forEach((l, i) => {
+      if ((wp && wp.leg === i) || cam.s < 0.9) return; // 전국 보기에서는 쉼터를 숨깁니다
+      const p = pointAt(g, g.restS[i]), x = sx(p.x), y = sy(p.y);
+      if (x < -10 || x > W + 10 || y < -10 || y > H + 10) return;
+      const ask = offering && i === Math.min(S.legIndex, r.legs.length - 1);
+      const ring = ask ? `<circle class="ask" r="${(8 + 8 * ((now / 900) % 1)).toFixed(1)}" opacity="${(1 - (now / 900) % 1).toFixed(2)}"/>` : "";
+      stops += `<g class="rest${visited.has(i) ? " visited" : ""}${ask ? " asking" : ""}" transform="translate(${x.toFixed(1)} ${y.toFixed(1)})">${ring}<rect x="-7" y="-7" width="14" height="14" rx="4"/><text y="3.5">${visited.has(i) ? "✓" : "P"}</text></g>`;
+    });
+    let callout = "";
+    if (wp) {
+      const p = pointAt(g, wp.s), x = sx(p.x), y = sy(p.y), t = (now - wp.at) / 700;
+      const drop = (1 - bounce(t)) * -40, sc = 0.4 + 0.6 * bounce(t), ph = (now / 1100) % 1;
+      const pulse = S.resting ? "" : `<circle class="pulse" r="${(10 + 16 * ph).toFixed(1)}" opacity="${(0.8 * (1 - ph)).toFixed(2)}"/>`;
+      stops += `<g class="wpin${S.resting ? " here" : ""}" transform="translate(${x.toFixed(1)} ${y.toFixed(1)})">${pulse}<ellipse class="shadow" rx="${(6 * sc).toFixed(1)}" ry="2.2"/>`
+        + `<g transform="translate(0 ${drop.toFixed(1)}) scale(${sc.toFixed(3)})"><path d="M0 0 C-4 -8 -12 -12 -12 -20 A12 12 0 1 1 12 -20 C12 -12 4 -8 0 0Z"/><text y="-16">${S.resting ? "P" : "경유"}</text></g></g>`;
+      // 말풍선: 경유지 추가 직후 4초 동안
+      const age = now - wp.at, op = Math.min(1, age / 300) * Math.min(1, Math.max(0, (4800 - age) / 500));
+      if (op > 0 || S.resting) {
+        const txt = S.resting ? `${wp.name} 도착` : `경유지 추가 · ${wp.name}`, w = txt.length * 12.5 + 22;
+        const carY = sy(car.y), below = carY < y - 8 && !S.resting; // 차가 위쪽이면 말풍선을 아래에 둬서 차를 가리지 않습니다
+        const bx = Math.max(6, Math.min(W - 6 - w, x - w / 2)), by = below ? Math.min(H - 34, y + 12) : Math.max(70, y - 64);
+        callout = `<g class="callout" opacity="${S.resting ? 1 : op.toFixed(2)}"><rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${w.toFixed(1)}" height="26" rx="13"/><text x="${(bx + w / 2).toFixed(1)}" y="${(by + 17.5).toFixed(1)}" text-anchor="middle">${txt}</text></g>`;
+      }
+    }
+    el("mStops").innerHTML = stops;
+    el("mCallout").innerHTML = callout;
+
+    // 내 차 (가는 방향으로 돌아간 화살표)
+    const ca = car.ang * 180 / Math.PI + 90;
+    el("mCar").innerHTML = S.legIndex < 0 && !S.demo ? "" :
+      `<g transform="translate(${sx(car.x).toFixed(1)} ${sy(car.y).toFixed(1)})"><circle r="16" class="halo"/><circle r="10" class="dot"/><path d="M0 -6.5 L5 5 L0 2.4 L-5 5Z" transform="rotate(${ca.toFixed(0)})"/></g>`;
+  }
+  setInterval(() => { try { frame(); } catch (e) { console.error(e); } }, 33); // 초당 약 30번
+  return { reset() { lastKey = null; }, state: () => ({ carS, floorS, wp, cam: { ...cam }, g: geo(S.routeKey), target: carTarget(geo(S.routeKey)) }) };
+}
+
+// ---------------- 목소리 고르기 ----------------
+// 녹음 목소리(Supertonic 2) 여러 개 중에서 고릅니다. 바꾸기는 정차 중에만 (주행 중 화면 조작 방지)
+const SYSTEM_VOICE = { id: "SYSTEM", name: "컴퓨터 기본 음성", desc: "녹음 없이 이 컴퓨터의 음성으로 읽어요" };
+function voiceName(id) { return (VOICES.find(v => v.id === id) || SYSTEM_VOICE).name; }
+function setVoice(id) {
+  if (id === S.voice) return;
+  S.voice = id; rememberVoice(id);
+  // 이야기를 읽는 중이면 끊지 않고, 지금 문장만 새 목소리로 다시 읽습니다 (미리 듣기 중에는 제외)
+  if (S.speaking && previewFlow === null) {
+    S.voiceRestart = true;
+    clearTimeout(speakTimer); selfCancelAt = performance.now();
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
+    if (liveAudio) liveAudio.pause();
+    if (currentDone) currentDone();
+  }
+  $("recVoiceSelect").value = id;
+  log(`🗣 목소리: ${voiceName(id)}`); loadVoices(); renderVoicePicker(); render();
+  const s = $("startVoice"); if (s) s.textContent = `지금 목소리: ${voiceName(id)}`;
+}
+let pickerFromStart = false;
+function openVoicePicker(fromStart = false) { pickerFromStart = fromStart; renderVoicePicker(); $("vpick").classList.add("show"); }
+function closeVoicePicker() {
+  stopPreview();
+  $("vpick").classList.remove("show");
+  if (pickerFromStart && $("startOverlay")) $("startOverlay").style.display = "";
+  pickerFromStart = false;
+}
+function renderVoicePicker() {
+  // 이야기 중에는 미리 듣기로 이야기를 끊지 않고, 고르면 바로 그 목소리로 이어서 읽습니다
+  const story = S.busy;
+  $("vpickNote").textContent = story ? "고르면 지금 이야기를 그 목소리로 바로 이어서 읽어요 · 말로도 바꿀 수 있어요: \"남자 목소리\", \"목소리 바꿔\""
+    : "▶ 눌러서 미리 들어 보고, 마음에 드는 목소리를 고르세요 · 주행 중에는 말로도 바꿀 수 있어요";
+  $("vpickNote").className = story ? "story" : "";
+  $("vlist").innerHTML = [...VOICES, SYSTEM_VOICE].map(v => `
+    <div class="vrow ${v.id === S.voice ? "sel" : ""}">
+      <span class="vi">${v.id === "SYSTEM" ? "💻" : v.id.startsWith("M") ? "🧔" : "👩"}</span>
+      <div><div class="vn">${v.name}</div><div class="vd">${v.desc || ""}${v.clips ? ` · ${v.clips}문장` : ""}</div></div>
+      <div class="vb">${story ? "" : `<button data-preview="${v.id}">▶ 듣기</button>`}${v.id === S.voice ? "<button disabled>✓ 사용 중</button>" : `<button class="pick" data-pick="${v.id}">${story ? "이 목소리로" : "고르기"}</button>`}</div>
+    </div>`).join("");
+}
+// 미리 듣기는 자기 순번(flow)으로 재생해서, 다른 소리가 시작될 때 확실히 끊을 수 있게 합니다
+let previewFlow = null;
+async function previewVoice(id) {
+  const keep = S.voice; S.voice = id;
+  // 이야기 중이면 멈추고 미리 듣기를 들려준 뒤, 잠시 후 다음 이야기로 이어 갑니다
+  if (S.busy) { cancelFlow(); S.lastEnd = performance.now(); } else { S.flow++; stopSpeaking(); }
+  const f = previewFlow = S.flow;
+  const ok = speak(P.voiceTest[0], f, "LOCAL");
+  S.voice = keep; // 미리 듣기만 하고 선택은 바꾸지 않습니다
+  await ok;
+  if (previewFlow === f) previewFlow = null;
+}
+// 미리 듣기가 아직 나오고 있으면 멈춥니다 (목소리 창 닫기, 출발할 때)
+function stopPreview() {
+  if (previewFlow !== null && previewFlow === S.flow) { S.flow++; stopSpeaking(); }
+  previewFlow = null;
+}
+
+// ---------------- 화면 ----------------
+const $ = id => document.getElementById(id);
+function render() {
+  const st = S.garage ? "GARAGE" : S.resting ? "PARK" : stage();
+  const pill = { COMPANION: ["🟢 길동무", "var(--green)"], WAKE: ["🟠 깨우기", "var(--orange)"], REST: ["🔴 쉼터 안내", "var(--red)"], PARK: ["🅿 쉬는 중", "var(--green)"], GARAGE: ["🅿 주차", "var(--green)"] }[st];
+  $("pill").textContent = pill[0]; $("pill").style.background = pill[1];
+  $("region").textContent = "📍 " + (S.region || "위치 확인 중");
+  const g = S.genre || recommended();
+  $("emoji").textContent = GENRES[g].emoji;
+  $("title").textContent = S.title || GENRES[g].label;
+  $("status").textContent = S.status;
+  $("subtitle").textContent = S.subtitle;
+  $("subtitle").classList.toggle("off", !$("subs").checked);
+  $("badge").style.display = S.fiction ? "" : "none";
+  $("bars").innerHTML = S.parts > 1 ? Array.from({ length: S.parts }, (_, i) => `<i class="${i <= S.partIndex ? "on" : ""}"></i>`).join("") : "";
+  $("startStop").textContent = S.running ? "■ 그만" : "▶ 시작";
+  document.querySelectorAll(".dock .g").forEach(b => b.classList.toggle("sel", b.dataset.genre === (S.override || null)));
+  $("micToggle").classList.toggle("on", S.mic && !!Rec);
+  $("micToggle").textContent = !Rec ? "🎤 ✕" : S.mic ? "🎤 켜짐" : "🎤 꺼짐";
+  const opts = S.pending ? S.pending.options : null;
+  const parked = isParked();
+  $("answers").classList.toggle("show", !!opts); $("story").classList.toggle("asking", !!opts);
+  // 주행 중: 선택지는 '이렇게 말하세요' 안내로만 보이고 눌리지 않습니다. 정차 중에만 터치 가능
+  $("answers").classList.toggle("voice", !parked);
+  if (opts) { $("opt1").lastChild.textContent = opts[0]; $("opt2").lastChild.textContent = opts[1]; }
+  $("voicebar").classList.toggle("show", !!opts);
+  $("voicebar").classList.toggle("idle", !(S.pending && S.pending.listening));
+  $("voiceLabel").textContent = !(S.pending && S.pending.listening) ? (parked ? "말하거나 눌러서 대답할 수 있어요" : "질문이 끝나면 말로 대답해 주세요")
+    : !S.mic || !Rec ? "🎤 음성 인식 꺼짐 · 시연자 키보드 1 / 2" : S.micError ? `🎤 음성 인식 오류(${S.micError}) · 시연자 키보드 1 / 2` : "🎤 듣고 있어요…";
+  $("heard").textContent = S.heard ? `“${S.heard}”` : "";
+  $("display").classList.toggle("speaking", S.speaking);
+  if ($("vpick").classList.contains("show") && S.busy !== ($("vpickNote").className === "story")) renderVoicePicker();
+  $("sound").textContent = S.silent ? "🔇 소리 꺼짐" : audioOk === false ? "⚠ 소리 안 남" : !koVoice ? "🔇 음성 없음" : "🔊";
+  $("soundWarn").style.display = (!S.silent && (audioOk === false || S.clipFail)) ? "" : "none";
+  $("soundWarn").textContent = audioOk === false
+    ? "⚠ 소리가 나지 않아요. 탭 음소거·컴퓨터 볼륨·출력 장치를 확인하고, ⚙ 시연 패널의 🔊 목소리 들어 보기를 눌러 주세요."
+    : "ℹ 이렇게 열면 일부 녹음 파일을 못 불러와서, 시연용이 아닌 문장은 컴퓨터 음성으로 읽어요. start.command로 열면 모두 녹음 목소리로 나와요.";
+  $("silent").textContent = S.silent ? "🔊 소리 켜기" : "🔇 소리 끄기";
+  $("npText").textContent = S.title ? `S J Story · ${S.title}` : "S J Story";
+  // 차량
+  document.body.classList.toggle("night", S.night);
+  const r = route(), leg = r.legs[S.legIndex];
+  const speed = S.garage ? S.garage.speed : S.resting || S.parked ? 0 : leg ? leg.speed : 0;
+  $("clSpeed").textContent = speed; $("curSpeed").textContent = speed; $("limit").textContent = S.garage ? 10 : r.limit;
+  const gearNow = S.garage ? S.garage.gear : speed ? "D" : "P";
+  [...$("clGear").children].forEach(s => s.classList.toggle("on", s.textContent === gearNow));
+  if (Road) Road.set(S.garage ? 0 : speed, sceneMode());
+  const m = effMinutes(); $("clTrip").textContent = `연속 운전 ${m >= 60 ? Math.floor(m / 60) + "시간 " : ""}${m % 60}분`;
+  $("ttDaw").classList.toggle("on", S.attention); $("ttLamp").classList.toggle("on", S.night); $("ttRear").classList.toggle("on", S.rear);
+  $("clNow").textContent = S.title ? `♪ S J Story · ${S.title}` : "♪ S J Story";
+  const rest = S.restStop || (S.legIndex >= 0 ? currentRest() : null);
+  $("tbt1").textContent = leg ? `${r.road} · ${r.name.includes("강릉") ? "강릉" : "영월"} 방향` : "경로 안내 대기";
+  $("tbt2").textContent = rest ? `${S.waypoint ? "경유지 " : "다음 "}${rest.kind} ${rest.name} ${rest.km}km` : "—";
+  if (S.garage) { $("tbt1").textContent = "목적지 도착"; $("tbt2").textContent = "안내를 마쳤어요 · 지하주차장"; }
+  $("outTemp").textContent = S.night ? 9 : 18;
+  // 패널
+  $("night").classList.toggle("on", S.night); $("rear").classList.toggle("on", S.rear); $("attention").classList.toggle("on", S.attention);
+  $("silent").classList.toggle("on", S.silent); $("demoStart").textContent = S.demo ? "■ 데모 멈추기" : "🚗 데모 주행 시작";
+}
+function log(line) {
+  const t = new Date().toTimeString().slice(0, 8);
+  const el = $("log"); el.textContent = `${t}  ${line}\n` + el.textContent.slice(0, 8000);
+}
+function tick() {
+  const tm = S.night ? "23:40" : new Date().toTimeString().slice(0, 5);
+  $("sbTime").textContent = tm; $("clTime").textContent = tm;
+}
+// 보기: 차량 실내 전체 ↔ 중앙 화면 확대 (Z 키)
+let zoomDisplay = false;
+function fit() {
+  const W = window.innerWidth, H = window.innerHeight;
+  // 확대 보기에서는 중앙 디스플레이(790,530 ~ 1870,980) 주변만 화면에 꽉 차게
+  const box = zoomDisplay ? { x: 770, y: 505, w: 1120, h: 500 } : { x: 0, y: 0, w: 1920, h: 1080 };
+  const s = Math.min(W / box.w, H / box.h);
+  const tx = (W - box.w * s) / 2 - box.x * s, ty = (H - box.h * s) / 2 - box.y * s;
+  $("scene").style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+  $("zoomBtn").textContent = zoomDisplay ? "🚗 실내 전체 보기" : "🔍 화면 확대";
+}
+
+// ---------------- 버튼 연결 ----------------
+// 화면 아래 ▶ 시작 · 스페이스 · 장르 버튼이 모두 이 길로 시작합니다.
+// 아직 출발 전이면 출발 안내부터 하고, 열려 있는 목소리 창(미리 듣기 포함)은 닫습니다.
+function startOrStop() {
+  if ($("startOverlay")) return go($("routeSelect").value);
+  if ($("vpick").classList.contains("show")) closeVoicePicker();
+  S.running ? stop() : start();
+}
+$("startStop").onclick = startOrStop;
+$("skip").onclick = () => submit({ t: "skip" }, "control");
+$("opt1").onclick = () => submit({ t: "opt", i: 0 }, "touch");
+$("opt2").onclick = () => submit({ t: "opt", i: 1 }, "touch");
+document.querySelectorAll(".dock .g").forEach(b => b.onclick = () => { changeGenre(b.dataset.genre); if (!S.running) startOrStop(); });
+$("micToggle").onclick = () => { if (!Rec) { log("⚠ 이 브라우저는 음성 인식을 지원하지 않아요. Chrome으로 열어 주세요. 시연자는 키보드 1 / 2로 대신 입력할 수 있어요."); return; } S.mic = !S.mic; S.micError = null; log(S.mic ? "🎤 음성 대답 켬" : "🎤 음성 대답 끔"); render(); };
+$("panelBtn").onclick = () => $("panel").classList.toggle("open");
+$("zoomBtn").onclick = () => { zoomDisplay = !zoomDisplay; fit(); };
+$("demoStart").onclick = () => { if (S.demo) { S.demo = false; clearTimeout(legTimer); clearTimeout(arriveTimer); log("■ 데모 멈춤"); render(); } else startDemo(); };
+$("demoNext").onclick = () => { if (!S.demo) { S.demo = true; S.routeKey = $("routeSelect").value; } nextLeg(); };
+$("routeSelect").onchange = () => { if (!S.demo && !S.garage) { S.routeKey = $("routeSelect").value; S.legIndex = -1; if (RouteMap) RouteMap.reset(); render(); } };
+$("night").onclick = () => { setNight(!S.night); log(S.night ? "🌙 밤 (전조등 켜짐)" : "☀ 낮"); tick(); };
+$("rear").onclick = () => { S.rear = !S.rear; S.spookyOk = false; log(S.rear ? "👥 뒷좌석 탑승" : "👤 뒷좌석 비움"); render(); };
+$("attention").onclick = () => setAttention(!S.attention);
+$("plus30").onclick = () => { S.extraMinutes += 30; if (stage() === "REST") enterRest(); log(`⏱ 연속 운전 ${effMinutes()}분`); render(); };
+$("arrive").onclick = arrive;
+$("resume").onclick = resume;
+$("silent").onclick = () => { S.silent = !S.silent; if (S.silent) stopSpeaking(); render(); };
+$("subs").onchange = render;
+$("keepListening").onchange = e => { S.keepListening = e.target.checked; log(S.keepListening ? "🎧 이어 듣기: 휴식 안내 뒤에도 이야기를 이어 가고, 결말은 10~15km 뒤에" : "⏸ 쉬어 가기: 휴식 안내 동안 이야기를 멈추고, 결말은 쉼터에 정차한 뒤에"); render(); };
+$("family").onchange = e => { S.family = e.target.checked; if (S.family && S.genre === "SPOOKY") { S.genre = null; S.override = null; } render(); };
+$("pace").onchange = e => { pace = PACE[e.target.value]; };
+$("voiceSelect").onchange = () => { koVoice = voices[+$("voiceSelect").value] || null; };
+$("rate").oninput = e => { userRate = +e.target.value; };
+$("testVoice").onclick = async () => { const f = S.flow; await speak(pick(P.voiceTest), f, "LOCAL"); };
+document.querySelectorAll(".pref").forEach(c => c.onchange = () => {
+  S.preferred = new Set([...document.querySelectorAll(".pref")].filter(x => x.checked).map(x => x.value)); render();
+});
+async function go(key) {
+  if (!$("startOverlay")) return; // 이미 출발함 (버튼을 두 번 누른 경우)
+  $("startOverlay").remove();
+  stopPreview(); if ($("vpick").classList.contains("show")) closeVoicePicker();
+  S.silent = false; loadVoices(); render();
+  Parking.loadEngine(); // 주차 때 기다리지 않도록 미리 불러 둡니다 (인터넷이 없으면 시연값으로 동작)
+  // 버튼을 누른 순간 바로 소리를 내야 브라우저가 음성 재생을 허용합니다
+  const f = S.flow;
+  await speakSeq([pick(P.greeting), pick(P.voiceGuide)], f);
+  startDemo(key);
+}
+$("goYeongdong").onclick = () => go("yeongdong");
+$("voiceBtn").onclick = () => $("vpick").classList.contains("show") ? closeVoicePicker() : openVoicePicker();
+$("vpickClose").onclick = closeVoicePicker;
+$("vlist").onclick = e => {
+  const p = e.target.closest("[data-preview]"), k = e.target.closest("[data-pick]");
+  if (p) previewVoice(p.dataset.preview);
+  if (k) setVoice(k.dataset.pick);
+};
+$("recVoiceSelect").onchange = e => setVoice(e.target.value);
+$("goVoice").onclick = () => { $("startOverlay").style.display = "none"; openVoicePicker(true); };
+$("goNational").onclick = () => go("national");
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+  const k = e.key.toLowerCase();
+  // 시연자 입력: 운전자가 "1번", "2번"이라고 말한 것으로 처리합니다 (Y = 네, N은 다음 지역)
+  if (e.key === "1") submit({ t: "opt", i: 0 }, "keyboard");
+  else if (e.key === "2") submit({ t: "opt", i: 1 }, "keyboard");
+  else if (k === "y") submit({ t: "yes" }, "keyboard");
+  else if (k === "v") submit({ t: "voice", id: voiceFromWords("목소리 바꿔") }, "keyboard");
+  else if (k === "n") $("demoNext").click();
+  else if (k === "g") Parking.start();
+  else if (k === "p" || k === "h") $("panel").classList.toggle("open");
+  else if (k === "z") { zoomDisplay = !zoomDisplay; fit(); }
+  else if (k === "f") { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); }
+  else if (e.key === " ") { e.preventDefault(); startOrStop(); }
+});
+// ---------------- 앞유리 너머 도로 풍경 ----------------
+// 사진이나 지도 이미지를 쓰지 않고, 원근(가까울수록 크게)을 계산해서 직접 그립니다.
+// 고속도로: 중앙분리대 · 가드레일 · 방음벽 · 가로등 · 단풍 든 산 · 먼 아파트 · 앞차와 마주 오는 차
+// 시내·국도: 보도블록 인도 · 연석 · 은행나무 가로수 · 가로등 · 걷는 사람 · 상가 건물과 돌출 간판 · 횡단보도 · 신호등
+function sceneMode() {
+  const v = $("sceneSelect").value;
+  return v === "auto" ? (S.routeKey === "national" ? "town" : "highway") : v;
+}
+var Road = (() => { // var: 이 코드보다 먼저 화면을 그려도 오류가 나지 않게
+  const cv = document.getElementById("roadCv"), g = cv.getContext("2d");
+  const W = cv.width, HZ = 300, M = 100;                          // 지평선 높이(px), 1m = 100
+  const SEG = 5 * M, DRAW = 130, EYE = 1.25 * M, N = 1800;        // 구간 5m, 650m 앞까지, 운전자 눈높이 1.25m
+  const LAYOUT = { highway: { cam: 5.3 * M }, town: { cam: 1.25 * M } };
+  let mode = "highway", speed = 0, pos = 0, last = 0, t = 0, camX = LAYOUT.highway.cam, skyX = 0, bob = 0;
+  const rng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
+  const hash = (...n) => rng(n.reduce((a, b) => Math.imul(a ^ b, 2654435761) + 12345 | 0, 7))();
+  const pickR = (r, list) => list[Math.floor(r() * list.length)];
+
+  // 길의 굽이: 직선과 완만한 곡선이 번갈아 나옵니다
+  const curve = new Float32Array(N);
+  { const r = rng(7); let i = 0; while (i < N - 260) { i += 60 + Math.floor(r() * 90); const len = 90 + Math.floor(r() * 120), c = (r() < .5 ? -1 : 1) * (.8 + r() * 1.8); for (let k = 0; k < len && i + k < N - 60; k++) curve[i + k] = c * Math.sin(Math.PI * k / len); i += len; } }
+
+  // 시내 건물: 양쪽에 3~6구간(15~30m) 길이의 상가 건물이 이어지고, 가끔 골목이 있습니다
+  const SIGNS = ["약국", "카페", "분식", "치킨", "안경", "꽃집", "빵집", "식당", "세탁", "미용실", "편의점", "철물", "문구", "국밥", "한의원", "서점"];
+  const WALLS = ["#c9b9a3", "#b7aa98", "#d8d2c6", "#9fa6ad", "#c4a58a", "#a9b5a3", "#d6c3a5", "#8f8a84", "#bfc5c9", "#c7b299"];
+  const SIGNC = ["#c0392b", "#1f6fb2", "#2e8b57", "#e67e22", "#6c3483", "#b7950b", "#1c2833", "#a93226", "#117a65"];
+  const blds = [[], []], bAt = [new Int16Array(N).fill(-1), new Int16Array(N).fill(-1)];
+  for (let s = 0; s < 2; s++) {
+    const r = rng(100 + s); let i = 0;
+    while (i < N) {
+      const len = 3 + Math.floor(r() * 4), gap = r() < .3 ? 1 : 0;
+      if (i + len > N) break;
+      const floors = 2 + Math.floor(r() * (r() < .2 ? 10 : 5));
+      for (let k = 0; k < len; k++) bAt[s][i + k] = blds[s].length;
+      blds[s].push({ start: i, len, floors, depth: (9 + r() * 8) * M, wall: pickR(r, WALLS), sign: pickR(r, SIGNC), text: pickR(r, SIGNS), seed: Math.floor(r() * 1e9) });
+      i += len + gap;
+    }
+  }
+
+  // ---- 투영: 앞쪽 거리 z의 한 지점을 화면 좌표로 ----
+  const E = Array.from({ length: DRAW + 1 }, () => ({ z: 1, k: 1, sh: 0 }));
+  const X = (e, x) => W / 2 + (x + e.sh - camX) * e.k;
+  const Y = (e, h) => HZ + (EYE + bob - h) * e.k;
+  const at = (a, b, f) => { const z = a.z + (b.z - a.z) * f; return { z, k: W / 2 / z, sh: a.sh + (b.sh - a.sh) * f }; };
+  function poly(pts, color) { g.fillStyle = color; g.beginPath(); g.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]); g.closePath(); g.fill(); }
+  // 땅 위의 띠 (차도, 인도, 차선) — a: 가까운 쪽 가장자리, b: 먼 쪽
+  const flat = (a, b, x0, x1, c, h = 0) => poly([X(a, x0), Y(a, h), X(a, x1), Y(a, h), X(b, x1), Y(b, h), X(b, x0), Y(b, h)], c);
+  // 길을 따라 선 벽 (중앙분리대, 가드레일, 방음벽, 건물 옆면)
+  const wall = (a, b, x, h0, h1, c) => poly([X(a, x), Y(a, h0), X(b, x), Y(b, h0), X(b, x), Y(b, h1), X(a, x), Y(a, h1)], c);
+  const wallT = (a, b, f0, f1, x, h0, h1, c) => wall(at(a, b, f0), at(a, b, f1), x, h0, h1, c);
+  function glow(x, y, r, color) {
+    if (r < 1) return;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, color); gr.addColorStop(1, "rgba(0,0,0,0)");
+    g.globalCompositeOperation = "lighter"; g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); g.globalCompositeOperation = "source-over";
+  }
+  const shade = (hex, f) => { const n = parseInt(hex.slice(1), 16); const c = s => Math.max(0, Math.min(255, Math.round(((n >> s) & 255) * f))); return `rgb(${c(16)},${c(8)},${c(0)})`; };
+
+  // ---- 하늘과 먼 산 ----
+  function ridge(off, base, amp, color, seed) {
+    g.fillStyle = color; g.beginPath(); g.moveTo(0, HZ + 2);
+    for (let x = 0; x <= W; x += 16) {
+      const u = (x + off) / 300 + seed;
+      g.lineTo(x, base - amp * (.55 + .25 * Math.sin(u) + .15 * Math.sin(u * 2.3 + 1) + .08 * Math.sin(u * 5.1 + 2)));
+    }
+    g.lineTo(W, HZ + 2); g.closePath(); g.fill();
+  }
+  function sky(night) {
+    const gr = g.createLinearGradient(0, 0, 0, HZ);
+    if (night) { gr.addColorStop(0, "#02040b"); gr.addColorStop(1, "#18223c"); } else { gr.addColorStop(0, "#5b8cc6"); gr.addColorStop(.75, "#b9d0e4"); gr.addColorStop(1, "#dfe8ee"); }
+    g.fillStyle = gr; g.fillRect(0, 0, W, HZ + 4);
+    if (night) {
+      g.fillStyle = "#fff";
+      for (let i = 0; i < 90; i++) { const x = (hash(i, 1) * W * 1.3 - skyX * .1) % W, y = hash(i, 2) * (HZ - 60); g.globalAlpha = .3 + hash(i, 3) * .6; g.fillRect((x + W) % W, y, 1.6, 1.6); }
+      g.globalAlpha = 1; g.fillStyle = "#f4efd6"; g.beginPath(); g.arc(W * .78 - skyX * .05 % 200, 70, 18, 0, 7); g.fill(); glow(W * .78 - skyX * .05 % 200, 70, 60, "rgba(240,235,200,.25)");
+    } else {
+      g.fillStyle = "rgba(255,255,255,.75)";
+      for (let i = 0; i < 6; i++) { const x = ((hash(i, 9) * W * 1.6 - skyX * .15) % (W + 400) + W + 400) % (W + 400) - 200, y = 40 + hash(i, 8) * 110; for (let k = 0; k < 5; k++) { g.beginPath(); g.ellipse(x + k * 34, y + Math.sin(k * 1.7) * 8, 46, 16, 0, 0, 7); g.fill(); } }
+    }
+    ridge(skyX * .25, HZ - 70, 85, night ? "#0c1322" : "#8fa6b6", 11);
+    ridge(skyX * .45, HZ - 22, 60, night ? "#090e18" : (mode === "highway" ? "#7b7d4e" : "#6d8a77"), 23);
+    if (mode === "highway") { // 단풍 든 앞산
+      for (let i = 0; i < 70; i++) {
+        const x = ((hash(i, 31) * W * 2 - skyX * .45) % (W * 2) + W * 2) % (W * 2) - W * .2, y = HZ - 8 - hash(i, 32) * 34;
+        g.fillStyle = night ? "#0b1018" : ["#b5562b", "#c9852f", "#8f6a2b", "#6f7a3a", "#a53d2a"][i % 5];
+        g.beginPath(); g.ellipse(x, y, 26 + hash(i, 33) * 30, 12 + hash(i, 34) * 10, 0, 0, 7); g.fill();
+      }
+      apartments(night);
+    }
+  }
+  function apartments(night) { // 먼 아파트 단지
+    for (let c = 0; c < 3; c++) {
+      const cx = ((c * 900 + 300 - skyX * .7) % 2700 + 2700) % 2700 - 300;
+      for (let i = 0; i < 6; i++) {
+        const w = 34 + hash(c, i, 1) * 26, h = 46 + hash(c, i, 2) * 50, x = cx + i * 46, y = HZ - 6 - h;
+        g.fillStyle = night ? "#121a28" : "#c7ccd0"; g.fillRect(x, y, w, h);
+        g.fillStyle = night ? "#1a2232" : "#b1b8bd"; g.fillRect(x + w, y + 3, 6, h - 3);
+        for (let fy = y + 4; fy < HZ - 10; fy += 5) for (let fx = x + 3; fx < x + w - 3; fx += 6) {
+          if (night && hash(c, i, fx | 0, fy | 0) < .45) { g.fillStyle = "#f2d38a"; g.fillRect(fx, fy, 3, 2); }
+          else if (!night) { g.fillStyle = "rgba(90,110,125,.35)"; g.fillRect(fx, fy, 3, 1.5); }
+        }
+      }
+    }
+  }
+
+  // ---- 길가의 것들 ----
+  function tree(e, x, kind, seed) {
+    const k = e.k, sx = X(e, x), sy = Y(e, 0); if (sx < -500 || sx > W + 500 || k * M < .25) return;
+    const n = S.night, r = rng(seed);
+    if (kind === "pine") {
+      const h = (6 + r() * 4) * M * k, w = h * .42;
+      g.fillStyle = n ? "#070b0c" : "#3c3226"; g.fillRect(sx - w * .05, sy - h * .25, w * .1, h * .25);
+      for (let i = 0; i < 4; i++) { const yy = sy - h * (.22 + i * .2), ww = w * (1 - i * .2); poly([sx - ww / 2, yy, sx + ww / 2, yy, sx, yy - h * .34], n ? "#0a1410" : ["#2f5130", "#355a35", "#2a4a2c", "#3a6038"][i]); }
+      return;
+    }
+    const ginkgo = kind === "ginkgo", h = (ginkgo ? 8 : 7) * M * k * (.85 + r() * .3), w = h * (ginkgo ? .5 : .78);
+    g.strokeStyle = n ? "#0a0a0b" : "#4a3a2c"; g.lineWidth = Math.max(1, .28 * M * k); g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx, sy - h * .45); g.stroke();
+    const cols = n ? ["#101410", "#141a12", "#0d110d"] : ginkgo ? (r() < .75 ? ["#e2b52f", "#f0c94a", "#c99a1e"] : ["#9fae3c", "#c4b23a", "#86952f"]) : ["#b9692c", "#c98f33", "#8e7a33", "#6f8a3a"];
+    for (let i = 0; i < 7; i++) {
+      const a = r() * Math.PI * 2, d = r() * .3;
+      g.fillStyle = cols[i % cols.length];
+      g.beginPath(); g.ellipse(sx + Math.cos(a) * w * d, sy - h * (ginkgo ? .66 : .62) + Math.sin(a) * h * d * .6, w * (.3 + r() * .14), h * (ginkgo ? .3 : .24), 0, 0, 7); g.fill();
+    }
+  }
+  function lamp(e, x, dir, both = false) { // dir: 팔이 뻗는 방향 (-1 왼쪽, +1 오른쪽)
+    const k = e.k, sx = X(e, x); if (sx < -600 || sx > W + 600 || k * M < .15) return;
+    const base = Y(e, 0), top = Y(e, 9 * M), n = S.night;
+    g.strokeStyle = n ? "#15181c" : "#737a82"; g.lineWidth = Math.max(1, .16 * M * k);
+    g.beginPath(); g.moveTo(sx, base); g.lineTo(sx, top); g.stroke();
+    for (const d of both ? [-1, 1] : [dir]) {
+      const hx = X(e, x + d * 2.4 * M), hy = Y(e, 9.3 * M);
+      g.lineWidth = Math.max(1, .1 * M * k); g.beginPath(); g.moveTo(sx, top); g.quadraticCurveTo(sx + (hx - sx) * .5, hy - .4 * M * k, hx, hy); g.stroke();
+      g.fillStyle = n ? "#fff3cf" : "#9aa1a8"; g.beginPath(); g.ellipse(hx, hy + .08 * M * k, .45 * M * k, .12 * M * k, 0, 0, 7); g.fill();
+      if (n) {
+        glow(hx, hy, 3.2 * M * k, "rgba(255,226,150,.5)");
+        g.save(); g.globalCompositeOperation = "lighter"; g.fillStyle = "rgba(255,214,140,.10)";
+        g.beginPath(); g.ellipse(hx, Y(e, 0), 4.5 * M * k, 1.2 * M * k, 0, 0, 7); g.fill(); g.restore();
+      }
+    }
+  }
+  function person(e, x, seed) {
+    const k = e.k, r = rng(seed), h = (1.58 + r() * .24) * M * k; if (h < 3) return;
+    const sx = X(e, x), sy = Y(e, 0); if (sx < -100 || sx > W + 100) return;
+    const n = S.night, w = h * .25, ph = t * 5.2 + (seed % 17), sw = Math.sin(ph) * h * .09;
+    const shirt = n ? "#1c2026" : pickR(r, ["#c0392b", "#2c3e50", "#ecf0f1", "#27ae60", "#8e44ad", "#d35400", "#34495e", "#f1c40f", "#7f8c8d"]);
+    const pants = n ? "#111317" : pickR(r, ["#2c3e50", "#1b1f24", "#5d6d7e", "#34495e", "#7b6a58"]);
+    g.fillStyle = "rgba(0,0,0,.18)"; g.beginPath(); g.ellipse(sx, sy, w * .7, w * .16, 0, 0, 7); g.fill();
+    g.strokeStyle = pants; g.lineCap = "round"; g.lineWidth = Math.max(1, w * .32);
+    g.beginPath(); g.moveTo(sx, sy - h * .47); g.lineTo(sx + sw, sy); g.moveTo(sx, sy - h * .47); g.lineTo(sx - sw, sy); g.stroke();
+    g.fillStyle = shirt; g.beginPath(); g.roundRect ? g.roundRect(sx - w / 2, sy - h * .82, w, h * .4, w * .25) : g.rect(sx - w / 2, sy - h * .82, w, h * .4); g.fill();
+    g.strokeStyle = shirt; g.lineWidth = Math.max(1, w * .22);
+    g.beginPath(); g.moveTo(sx - w * .45, sy - h * .78); g.lineTo(sx - w * .5 - sw * .6, sy - h * .5); g.moveTo(sx + w * .45, sy - h * .78); g.lineTo(sx + w * .5 + sw * .6, sy - h * .5); g.stroke();
+    g.fillStyle = n ? "#2a2522" : "#efc8a2"; g.beginPath(); g.arc(sx, sy - h * .9, h * .075, 0, 7); g.fill();
+    g.fillStyle = n ? "#0b0b0c" : "#2a1f1a"; g.beginPath(); g.arc(sx, sy - h * .915, h * .078, Math.PI, 0); g.fill();
+    if (r() < .25) { g.fillStyle = n ? "#15171a" : pickR(r, ["#7d5a3c", "#222", "#a33"]); g.fillRect(sx + w * .45, sy - h * .62, w * .35, h * .18); } // 가방
+    g.lineCap = "butt";
+  }
+  function blade(e, x, text, color) { // 건물에서 튀어나온 세로 간판
+    const k = e.k, sx = X(e, x); if (k * M < .6) return;
+    const w = .75 * M * k, y0 = Y(e, 7.4 * M), y1 = Y(e, 3.8 * M), n = S.night;
+    g.fillStyle = color; g.fillRect(sx - w / 2, y0, w, y1 - y0);
+    g.strokeStyle = n ? "rgba(255,255,255,.9)" : "#f4f4f4"; g.lineWidth = Math.max(1, w * .07); g.strokeRect(sx - w / 2, y0, w, y1 - y0);
+    if (n) glow(sx, (y0 + y1) / 2, w * 1.6, "rgba(255,255,255,.18)");
+    const fs = Math.min(w * .62, (y1 - y0) / (text.length + .6));
+    if (fs >= 7) { g.fillStyle = "#fff"; g.font = `800 ${fs}px sans-serif`; g.textAlign = "center"; g.textBaseline = "middle"; [...text].forEach((ch, i) => g.fillText(ch, sx, y0 + (y1 - y0) * (i + .5) / text.length)); }
+  }
+  function signal(e, x) { // 횡단보도 앞 신호등
+    const k = e.k, sx = X(e, x); if (k * M < .3) return;
+    g.strokeStyle = S.night ? "#14171a" : "#5b6168"; g.lineWidth = Math.max(1, .18 * M * k);
+    const top = Y(e, 6 * M), ax = X(e, x - 5.5 * M);
+    g.beginPath(); g.moveTo(sx, Y(e, 0)); g.lineTo(sx, top); g.lineTo(ax, top); g.stroke();
+    const bw = 1.3 * M * k, bh = .42 * M * k, bx = ax + .4 * M * k, by = top + .1 * M * k;
+    g.fillStyle = "#1b1d20"; g.fillRect(bx, by, bw, bh);
+    ["#3a1010", "#3a3010", "#19e07a"].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(bx + bw * (i + .5) / 3, by + bh / 2, bh * .32, 0, 7); g.fill(); });
+    glow(bx + bw * 2.5 / 3, by + bh / 2, bh * (S.night ? 2.4 : 1.2), "rgba(40,255,140,.55)");
+  }
+  function car(e, x, body, front) { // 앞차(뒷모습) 또는 마주 오는 차(앞모습)
+    const k = e.k, cx = X(e, x), gy = Y(e, 0), w = 1.86 * M * k, h = 1.45 * M * k; if (w < 2 || cx < -w || cx > W + w) return;
+    const n = S.night;
+    g.fillStyle = "rgba(0,0,0,.35)"; g.beginPath(); g.ellipse(cx, gy, w * .62, w * .09, 0, 0, 7); g.fill();
+    g.fillStyle = "#111"; g.fillRect(cx - w * .46, gy - h * .2, w * .17, h * .2); g.fillRect(cx + w * .29, gy - h * .2, w * .17, h * .2);
+    g.fillStyle = n ? shade(body, .25) : body; g.fillRect(cx - w / 2, gy - h * .62, w, h * .47);
+    poly([cx - w * .44, gy - h * .62, cx + w * .44, gy - h * .62, cx + w * .34, gy - h, cx - w * .34, gy - h], n ? shade(body, .22) : shade(body, .9));
+    poly([cx - w * .38, gy - h * .64, cx + w * .38, gy - h * .64, cx + w * .3, gy - h * .95, cx - w * .3, gy - h * .95], n ? "#05070a" : "#25303a");
+    g.fillStyle = n ? "#555" : "#f2f2f2"; g.fillRect(cx - w * .12, gy - h * .36, w * .24, h * .09); // 번호판
+    if (front) {
+      g.fillStyle = n ? "#fffbe8" : "#dfe6ea"; [-1, 1].forEach(s => { g.beginPath(); g.ellipse(cx + s * w * .36, gy - h * .45, w * .09, h * .05, 0, 0, 7); g.fill(); if (n) glow(cx + s * w * .36, gy - h * .45, w * 1.1, "rgba(255,250,220,.5)"); });
+    } else {
+      g.fillStyle = n ? "#ff3b30" : "#b3241d"; [-1, 1].forEach(s => { g.fillRect(cx + s * w * .38 - w * .08, gy - h * .55, w * .16, h * .1); if (n) glow(cx + s * w * .38, gy - h * .5, w * .55, "rgba(255,40,30,.45)"); });
+    }
+  }
+
+  // ---- 구간 하나 그리기 ----
+  function segHighway(a, b, idx) {
+    const n = S.night, L = 13.6 * M;
+    flat(a, b, -90 * M, 90 * M, n ? "#06090a" : ((idx >> 1) & 1 ? "#6d7d45" : "#67773f"));
+    flat(a, b, -L, L, n ? "#0f1114" : (idx & 1 ? "#4d5258" : "#4a4f55"));
+    const white = n ? "#a9aaa4" : "#ecebe4", yellow = n ? "#a68a2a" : "#e3b53c";
+    for (const s of [-1, 1]) {
+      flat(a, b, s * .45 * M, s * .6 * M, yellow);
+      flat(a, b, s * 10.95 * M, s * 11.1 * M, white);
+      if (idx % 4 < 2) { flat(a, b, s * 3.75 * M, s * 3.9 * M, white); flat(a, b, s * 7.35 * M, s * 7.5 * M, white); }
+    }
+    // 중앙분리대 (콘크리트)
+    wall(a, b, .3 * M, 0, .85 * M, n ? "#2a2c2e" : "#b9b6ad"); flat(a, b, -.3 * M, .3 * M, n ? "#33363a" : "#d4d1c8", .85 * M);
+    // 가드레일
+    for (const s of [-1, 1]) {
+      wall(a, b, s * 13.9 * M, .45 * M, .8 * M, n ? "#3b4046" : "#c3c9ce");
+      wall(a, b, s * 13.9 * M, .58 * M, .64 * M, n ? "#24272b" : "#8d959c");
+      g.strokeStyle = n ? "#2a2e33" : "#8d949b"; g.lineWidth = Math.max(1, .12 * M * a.k);
+      g.beginPath(); g.moveTo(X(a, s * 13.95 * M), Y(a, 0)); g.lineTo(X(a, s * 13.95 * M), Y(a, .8 * M)); g.stroke();
+      if (n && idx % 2 === 0) glow(X(a, s * 13.9 * M), Y(a, .7 * M), .25 * M * a.k, "rgba(255,190,90,.7)"); // 반사판
+    }
+    // 방음벽 구간
+    if (Math.floor(idx / 90) % 5 === 2) {
+      wall(a, b, 15.5 * M, 0, 5 * M, n ? "rgba(30,40,55,.75)" : "rgba(150,180,195,.62)");
+      wall(a, b, 15.5 * M, 4.6 * M, 5 * M, n ? "#1d232b" : "#5f7480");
+      g.strokeStyle = n ? "#1a1f26" : "#6b7c86"; g.lineWidth = Math.max(1, .2 * M * a.k);
+      g.beginPath(); g.moveTo(X(a, 15.5 * M), Y(a, 0)); g.lineTo(X(a, 15.5 * M), Y(a, 5 * M)); g.stroke();
+    }
+    // 바깥쪽 나무 (먼 것부터)
+    for (const s of [1, -1]) {
+      const cnt = hash(idx, s, 1) < .6 ? 2 : 1;
+      for (let i = 0; i < cnt; i++) {
+        const d = 17 + hash(idx, s, i, 2) * 26;
+        tree(at(a, b, hash(idx, s, i, 3)), s * d * M, hash(idx, s, i, 4) < .5 ? "pine" : "maple", idx * 31 + i + (s > 0 ? 7 : 0));
+      }
+    }
+    if (idx % 8 === 0) lamp(a, 0, 1, true);
+  }
+  function segTown(a, b, idx, ii) {
+    const n = S.night, R = 6.6 * M, CURB = .25 * M, F = R + CURB + 4 * M;
+    flat(a, b, -90 * M, 90 * M, n ? "#0b0c0e" : "#7f7b73");
+    const tile = n ? (idx & 1 ? "#24221f" : "#201e1b") : (idx & 1 ? "#bba99a" : "#ae9c8d");
+    for (const s of [-1, 1]) {
+      flat(a, b, s * (R + CURB), s * F, tile);
+      flat(a, at(a, b, .05), s * (R + CURB), s * F, n ? "#1a1816" : "#998878"); // 보도블록 이음
+      flat(a, b, s * R, s * (R + CURB), n ? "#3a3a38" : "#d2d0ca");          // 연석 윗면
+    }
+    flat(a, b, -R, R, n ? "#0e1013" : (idx & 1 ? "#4b5056" : "#474c52"));
+    for (const s of [-1, 1]) wall(a, b, s * R, 0, .15 * M, n ? "#2c2c2a" : "#bdbab2"); // 연석 옆면
+    const white = n ? "#a9aaa4" : "#efeee8", yellow = n ? "#a68a2a" : "#e3b53c", cw = idx % 90;
+    if (cw === 30) { for (let x = -R + .5 * M; x < R - .5 * M; x += 1.0 * M) flat(a, b, x, x + .5 * M, white); } // 횡단보도
+    else {
+      flat(a, b, -.3 * M, -.15 * M, yellow); flat(a, b, .15 * M, .3 * M, yellow); // 중앙선 (노란 겹선)
+      if (idx % 2 === 0) for (const s of [-1, 1]) flat(a, b, s * 3.2 * M, s * 3.35 * M, white);
+      for (const s of [-1, 1]) flat(a, b, s * (R - .35 * M), s * (R - .2 * M), white);
+      if (cw === 29) flat(at(a, b, .8), at(a, b, .9), .3 * M, R, white);   // 정지선
+      if (cw === 31) flat(at(a, b, .1), at(a, b, .2), -R, -.3 * M, white);
+    }
+    // 상가 건물 (길 쪽 벽면, 1층 유리창과 간판 띠, 위층 창문)
+    for (const si of [0, 1]) {
+      const bi = bAt[si][ii]; if (bi < 0) continue;
+      const bd = blds[si][bi], s = si ? 1 : -1, x = s * F, Hb = bd.floors * 3.3 * M, kk = ii - bd.start;
+      wall(a, b, x, 0, Hb, n ? shade(bd.wall, .16) : shade(bd.wall, si ? .86 : .96));
+      const big = a.k * M > 1.1;
+      wallT(a, b, .06, .94, x, .3 * M, 2.9 * M, n ? (hash(bd.seed, kk) < .7 ? "#e9c77e" : "#1a1d22") : "#45606f");
+      wall(a, b, x, 3 * M, 3.9 * M, n ? shade(bd.sign, .9) : bd.sign);
+      if (big) {
+        for (let f = 1; f < bd.floors; f++) for (const [w0, w1] of [[.12, .42], [.58, .88]]) {
+          const lit = n && hash(bd.seed, kk, f, w0 * 10 | 0) < .5;
+          wallT(a, b, w0, w1, x, (f * 3.3 + 1) * M, (f * 3.3 + 2.5) * M, n ? (lit ? "#f3d690" : "#151a22") : "#5e7487");
+        }
+      }
+      wall(a, b, x, Hb - .35 * M, Hb, n ? "#0c0d0f" : shade(bd.wall, .7));
+      if (kk === 0) { // 건물 앞면 (골목 쪽)
+        const x0 = X(a, x), x1 = X(a, x + s * bd.depth), y0 = Y(a, Hb), y1 = Y(a, 0);
+        g.fillStyle = n ? shade(bd.wall, .1) : shade(bd.wall, .74); g.fillRect(Math.min(x0, x1), y0, Math.abs(x1 - x0), y1 - y0);
+        if (big) for (let f = 1; f < bd.floors; f++) for (let wx = 1; wx < bd.depth / M - 1.5; wx += 3) {
+          const lit = n && hash(bd.seed, f, wx) < .45, xa = X(a, x + s * wx * M), xb = X(a, x + s * (wx + 1.6) * M);
+          g.fillStyle = n ? (lit ? "#f3d690" : "#151a22") : "#5e7487"; g.fillRect(Math.min(xa, xb), Y(a, (f * 3.3 + 2.5) * M), Math.abs(xb - xa), Y(a, (f * 3.3 + 1) * M) - Y(a, (f * 3.3 + 2.5) * M));
+        }
+      }
+      if (kk === 1 && bd.floors >= 2) blade(at(a, b, .5), s * (F - .55 * M), bd.text, bd.sign);
+    }
+    if (cw === 29) signal(at(a, b, .7), R + .6 * M);
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < 2; i++) if (hash(idx, s, i, 5) < .32) person(at(a, b, hash(idx, s, i, 6)), s * (R + (1.4 + hash(idx, s, i, 7) * 2.4) * M), idx * 13 + i * 5 + (s > 0 ? 3 : 0));
+      if (idx % 2 === 0 && cw !== 30) tree(at(a, b, .5), s * (R + 1 * M), hash(idx, s, 8) < .8 ? "ginkgo" : "zelkova", idx * 7 + (s > 0 ? 1 : 0));
+      if (idx % 6 === 3) lamp(a, s * (R + .55 * M), -s);
+    }
+  }
+
+  // ---- 한 장면 ----
+  function frame(now) {
+    const dt = Math.min(.05, (now - last) / 1000 || 0); last = now; t += dt;
+    pos += speed / 3.6 * M * dt;
+    const n = S.night, segI = Math.floor(pos / SEG), frac = pos - segI * SEG;
+    const lay = LAYOUT[mode];
+    camX += (lay.cam + Math.sin(t * .45) * .06 * M - camX) * Math.min(1, dt * 3);
+    bob = speed ? Math.sin(t * 9) * .006 * M : 0;
+    skyX += curve[segI % N] * speed * dt * .6;
+    let sh = 0, dx = -curve[segI % N] * frac / SEG;
+    for (let j = 0; j <= DRAW; j++) { const e = E[j]; e.z = Math.max(8, (j + 1) * SEG - frac); e.k = W / 2 / e.z; e.sh = sh; dx += curve[(segI + j) % N]; sh += dx; }
+    sky(n);
+    // 차: 앞차, 옆 차로 차, 마주 오는 차 (앞쪽 거리 z, 옆 위치 x)
+    const cars = mode === "highway"
+      ? [{ z: (32 + Math.sin(t * .3) * 4) * M, x: 5.7 * M, c: "#d9dde2" }, { z: (90 - ((t * 3) % 80)) * M, x: 9.3 * M, c: "#2d4e7a" }, { z: (420 - ((t * 55) % 420)) * M, x: -5.7 * M, c: "#7d1f1f", front: true }]
+      : [{ z: (26 + Math.sin(t * .4) * 3) * M, x: 1.65 * M, c: "#3b3f45" }, { z: (300 - ((t * 30) % 300)) * M, x: -1.65 * M, c: "#c9cdd2", front: true }];
+    for (let j = DRAW - 1; j >= 0; j--) {
+      const a = E[j], b = E[j + 1], idx = segI + j;
+      if (j === 46) { // 먼 풍경에 옅은 안개 (공기 원근)
+        const gr = g.createLinearGradient(0, HZ - 150, 0, HZ + 30);
+        gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(.7, n ? "rgba(20,28,46,.35)" : "rgba(214,226,234,.45)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+        g.fillStyle = gr; g.fillRect(0, HZ - 150, W, 180);
+      }
+      if (mode === "highway") segHighway(a, b, idx); else segTown(a, b, idx, idx % N);
+      for (const c of cars) if (c.z >= a.z && c.z < b.z) car(at(a, b, (c.z - a.z) / (b.z - a.z)), c.x, c.c, c.front);
+    }
+    if (n) { // 전조등이 비추는 길
+      g.save(); g.globalCompositeOperation = "lighter";
+      const gr = g.createRadialGradient(W / 2, 560, 40, W / 2, 560, 760); gr.addColorStop(0, "rgba(255,240,200,.30)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = gr; g.beginPath(); g.moveTo(W / 2 - 900, 560); g.lineTo(W / 2 - 120, HZ + 40); g.lineTo(W / 2 + 120, HZ + 40); g.lineTo(W / 2 + 900, 560); g.closePath(); g.fill(); g.restore();
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  return { set(kmh, m) { speed = kmh; if (m !== mode) { mode = m; } } };
+})();
+$("sceneSelect").onchange = render;
+
+// ---------------- 주차 위치 기억 ----------------
+// 출발지→목적지는 이야기·휴식, 목적지 도착 뒤에는 주차 위치를 기억합니다.
+// 판단 규칙은 앱의 core/ParkingLocator.kt와 같습니다: R단에서만 읽고, 많이 읽은 값을 골라, P단에서 한 번 알립니다.
+// 시연 장면과 기어는 모의 입력이고, 글자는 그려진 장면에서 실제로 인식합니다 (Tesseract.js).
+var Parking = (() => {
+  const CAM_W = 640, CAM_H = 360;
+  const cam = $("pkCam"), ctx = cam.getContext("2d", { willReadFrequently: true });
+  const view = $("garageCv"), vg = view.getContext("2d");
+  const FLOOR_COLOR = { B1: "#2e7d32", B2: "#1565c0", B3: "#e65100", B4: "#6a1b9a" };
+  const SCENES = [
+    { floor: "B2", pillar: "C-16", say: "R단 · 옆 기둥 C-16이 보여요" },
+    { floor: "B2", pillar: "C-17", say: "R단 · 후진 중, C-17 기둥이 보여요" },
+    { floor: "B2", pillar: "C-17", say: "R단 · 자리에 들어옴, C-17 기둥 옆" },
+  ];
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let run = 0, readings = [], rois = [], engine = null, worker = null, viewOn = false;
+
+  // ---------- 문자 인식 엔진 ----------
+  function loadEngine() {
+    if (engine) return engine;
+    engine = (async () => {
+      if (!window.Tesseract) await new Promise((ok, fail) => {
+        const s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+        s.onload = ok; s.onerror = fail; document.head.appendChild(s);
+      });
+      worker = await Tesseract.createWorker("eng");
+    })().catch(() => { log("⚠ 문자 인식 엔진을 불러오지 못했어요 (인터넷 필요). 주차 시연은 시연값으로 동작합니다."); });
+    return engine;
+  }
+  function cropForOcr(r) { // 흰 글자를 검은 글자로 바꿔 대비를 높입니다
+    const scale = 2, pad = 24, c = document.createElement("canvas");
+    c.width = r.w * scale + pad * 2; c.height = r.h * scale + pad * 2;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.drawImage(cam, r.x, r.y, r.w, r.h, pad, pad, r.w * scale, r.h * scale);
+    const img = x.getImageData(0, 0, c.width, c.height), d = img.data;
+    for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = .299 * d[i] + .587 * d[i + 1] + .114 * d[i + 2] > 175 ? 0 : 255;
+    x.putImageData(img, 0, 0);
+    x.fillStyle = "#fff";
+    x.fillRect(0, 0, c.width, pad); x.fillRect(0, c.height - pad, c.width, pad);
+    x.fillRect(0, 0, pad, c.height); x.fillRect(c.width - pad, 0, pad, c.height);
+    return c;
+  }
+  function parseFloor(t) { const m = t.toUpperCase().replace(/\s+/g, "").match(/[B8]([1-9])/); return m ? "B" + m[1] : null; }
+  function parsePillar(t) {
+    const m = t.toUpperCase().replace(/[|lI]/g, "1").replace(/O/g, "0").match(/([A-H])\s*[-–—_.]?\s*(\d{1,3})/);
+    return m ? `${m[1]}-${m[2].padStart(2, "0")}` : null;
+  }
+  async function readFrame(scene) {
+    const out = { floor: null, pillar: null, simulated: false };
+    if (!worker) return { floor: scene.floor, pillar: scene.pillar, simulated: true };
+    for (const r of rois) {
+      await worker.setParameters({ tessedit_char_whitelist: r.type === "floor" ? "B0123456789" : "ABCDEFGH0123456789-", tessedit_pageseg_mode: "7" });
+      const { data } = await worker.recognize(cropForOcr(r));
+      if (r.type === "floor") out.floor = parseFloor(data.text); else out.pillar = parsePillar(data.text);
+    }
+    return out;
+  }
+  // 많이 읽은 값 (같으면 최근 값). 한두 번 잘못 읽어도 묻힙니다
+  function vote(key) {
+    const hits = readings.map(r => r[key]).filter(Boolean);
+    const count = v => hits.filter(h => h === v).length;
+    return hits.reduce((best, v) => count(v) >= count(best) ? v : best, hits[0] || null);
+  }
+
+  // ---------- 빌트인캠 화면 ----------
+  function drawBlank(msg) {
+    ctx.fillStyle = "#05070a"; ctx.fillRect(0, 0, CAM_W, CAM_H);
+    ctx.fillStyle = "#8b95a5"; ctx.font = "22px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(msg, CAM_W / 2, CAM_H / 2);
+  }
+  function drawScene(s) {
+    const g = ctx.createLinearGradient(0, 0, 0, CAM_H);
+    g.addColorStop(0, "#2c2f34"); g.addColorStop(.45, "#4b4f56"); g.addColorStop(1, "#3a3d42");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, CAM_W, CAM_H);
+    ctx.fillStyle = "#f4f1e1"; for (let i = 0; i < 4; i++) ctx.fillRect(80 + i * 150, 40, 70, 6);
+    ctx.strokeStyle = "#e8c547"; ctx.lineWidth = 3;
+    for (let i = -3; i <= 3; i++) { ctx.beginPath(); ctx.moveTo(CAM_W / 2 + i * 40, 230); ctx.lineTo(CAM_W / 2 + i * 190, CAM_H); ctx.stroke(); }
+    ctx.fillStyle = "#8d8c86"; [[40, 90, 40], [560, 90, 40], [130, 110, 26], [490, 110, 26]].forEach(([x, y, w]) => ctx.fillRect(x, y, w, 150));
+    ctx.fillStyle = "#cfcdc4"; ctx.fillRect(220, 34, 200, 326);
+    ctx.fillStyle = FLOOR_COLOR[s.floor] || "#444"; ctx.fillRect(220, 60, 200, 110);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 88px Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(s.floor, 320, 117);
+    ctx.fillStyle = "#1d2a44"; ctx.fillRect(235, 190, 170, 80);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 60px Arial, sans-serif"; ctx.fillText(s.pillar, 320, 232);
+    rois = [{ type: "floor", x: 240, y: 65, w: 160, h: 100 }, { type: "pillar", x: 238, y: 193, w: 164, h: 74 }];
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.fillRect(0, 0, CAM_W, 26);
+    ctx.fillStyle = "#ff3b30"; ctx.beginPath(); ctx.arc(14, 13, 6, 0, 7); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.font = "13px Menlo, monospace"; ctx.fillText("BUILT-IN CAM · 시연 장면", 28, 18);
+  }
+  // 번호판·사람이 찍히지 않도록 기둥 표지 주변만 잘라 보냅니다
+  function snapshot() {
+    const c = document.createElement("canvas"); c.width = 240; c.height = 250;
+    c.getContext("2d").drawImage(cam, 200, 35, 240, 250, 0, 0, 240, 250);
+    return c.toDataURL("image/jpeg", .7);
+  }
+
+  // ---------- 앞유리 너머 지하주차장 ----------
+  // 앞으로 갈수록 기둥 번호가 작아집니다. 후진하면 C-16에서 C-17 쪽으로 물러납니다.
+  const SPACING = 8, NEAR = 5, zOf = n => (20 - n) * SPACING - NEAR;
+  let camZ = 0, targetZ = 0, viewLast = 0;
+  function drawView(now) {
+    if (!viewOn) return;
+    const dt = Math.min(.05, (now - viewLast) / 1000 || 0); viewLast = now;
+    camZ += (targetZ - camZ) * (1 - Math.exp(-dt * .9));
+    const W = 1920, H = 560, HZ = 240, CX = 960, F = 900, CEIL = -1.5, GROUND = 1.2, g = vg;
+    const px = (x, z) => CX + x * F / z, py = (y, z) => HZ + y * F / z;
+    let gr = g.createLinearGradient(0, 0, 0, HZ); gr.addColorStop(0, "#3a3e44"); gr.addColorStop(1, "#14161a");
+    g.fillStyle = gr; g.fillRect(0, 0, W, HZ);
+    gr = g.createLinearGradient(0, HZ, 0, H); gr.addColorStop(0, "#14161a"); gr.addColorStop(1, "#565a60");
+    g.fillStyle = gr; g.fillRect(0, HZ, W, H - HZ);
+    g.strokeStyle = "#c9a93a"; g.lineWidth = 3;
+    for (const x of [-2.7, 2.7]) { g.beginPath(); g.moveTo(px(x, 90), py(GROUND, 90)); g.lineTo(px(x, 1), py(GROUND, 1)); g.stroke(); }
+    for (let i = Math.floor((camZ + 80) / 6); i >= Math.ceil((camZ + 1) / 6); i--) { // 천장 조명
+      const z0 = i * 6 - camZ, z1 = z0 + 1.2;
+      g.fillStyle = z0 > 40 ? "#8d8b80" : "#f4f1e1";
+      g.beginPath(); g.moveTo(px(-.9, z1), py(CEIL, z1)); g.lineTo(px(.9, z1), py(CEIL, z1)); g.lineTo(px(.9, z0), py(CEIL, z0)); g.lineTo(px(-.9, z0), py(CEIL, z0)); g.closePath(); g.fill();
+    }
+    for (let i = Math.floor((camZ + 90) / SPACING); i >= Math.ceil((camZ + 1.4) / SPACING) - 1; i--) {
+      const z = i * SPACING - camZ, n = 20 - i;
+      for (const side of [-1, 1]) {
+        const carZ = z + SPACING / 2;
+        if (carZ > 1.4) { // 기둥 사이에 세워 둔 차
+          const k = F / carZ, cx = px(side * 5, carZ), by = py(GROUND, carZ), hash = (i * 7 + (side > 0 ? 3 : 0)) % 4;
+          g.fillStyle = ["#4d5560", "#7c8087", "#2c3644", "#8b3a36"][(hash + 4) % 4];
+          g.fillRect(cx - .95 * k, by - .62 * k, 1.9 * k, .62 * k);
+          g.fillRect(cx - .7 * k, by - 1.05 * k, 1.4 * k, .45 * k);
+          g.fillStyle = "#14181e"; g.fillRect(cx - .6 * k, by - .98 * k, 1.2 * k, .34 * k);
+        }
+        if (z <= 1.4) continue;
+        const k = F / z, x0 = px(side * 3.4 - .45, z), w = .9 * k, top = py(CEIL, z), bottom = py(GROUND, z);
+        g.fillStyle = "#b7b5ac"; g.fillRect(x0, top, w, bottom - top);
+        g.fillStyle = "#d9c33c"; g.fillRect(x0, bottom - .22 * k, w, .22 * k);
+        if (k < 26 || n < 1) continue;
+        const mid = x0 + w / 2;
+        g.fillStyle = FLOOR_COLOR.B2; g.fillRect(x0, py(-.85, z), w, .55 * k);
+        g.fillStyle = "#1d2a44"; g.fillRect(x0 + .05 * k, py(-.22, z), w - .1 * k, .42 * k);
+        g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle";
+        g.font = `800 ${.4 * k}px Arial, sans-serif`; g.fillText("B2", mid, py(-.575, z));
+        g.font = `800 ${.27 * k}px Arial, sans-serif`; g.fillText(`C-${n}`, mid, py(-.01, z));
+      }
+    }
+    requestAnimationFrame(drawView);
+  }
+
+  // ---------- 화면 갱신 ----------
+  const setStatus = t => { $("pkStatus").textContent = t; S.status = t; };
+  function line(text, cls) {
+    const d = document.createElement("div"); d.textContent = text; if (cls) d.className = cls;
+    $("pkLog").prepend(d);
+    log("🅿 " + text);
+  }
+  function renderEstimate() {
+    const floor = vote("floor"), pillar = vote("pillar");
+    $("pkEst").textContent = `${floor || "—"} · ${pillar || "—"}`;
+    $("pkSub").textContent = readings.length ? `읽은 장면 ${readings.length}개 · 많이 읽은 값을 고릅니다` : "후진을 시작하면 기둥 글자를 읽어요";
+  }
+  function setGear(gear, speed) { S.garage = { gear, speed }; render(); }
+  function say(text) { cancelFlow(); S.title = "주차 위치 기억"; return speak(text, S.flow); }
+  function tickPhone() {
+    const n = new Date();
+    $("pkClock").textContent = n.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+    $("pkDate").textContent = n.toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "long" });
+  }
+  function floorKo(f) { return f ? `지하 ${f.slice(1)}층` : ""; }
+  function spotLabel(floor, pillar) { // 앱의 ParkingSpot.summary()와 같은 문구
+    if (floor && pillar) return `${floorKo(floor)} · ${pillar} 기둥 옆`;
+    if (floor) return `${floorKo(floor)} · 기둥 번호 확인 필요`;
+    if (pillar) return `${pillar} 기둥 옆 · 층 확인 필요`;
+    return "글자를 읽지 못했어요. 주차 사진을 확인해 주세요";
+  }
+
+  // ---------- 흐름: 통로(D) → 후진(R) → 주차(P) → 휴대폰 알림 ----------
+  async function flow(tok) {
+    const alive = () => tok === run;
+    setStatus("목적지에 도착했어요 · 주차장 통로를 지나는 중");
+    line("D단 · 통로 주행 (글자 인식 꺼짐)");
+    await Promise.all([sleep(3500), say(pick(P.parkArrive))]);
+    if (!alive()) return;
+
+    targetZ = zOf(17); setGear("R", 3);
+    setStatus("⏪ 후진 감지 · 빌트인캠이 기둥 글자를 읽는 중");
+    line("R단 감지 · 빌트인캠 글자 인식 시작");
+    await Promise.race([loadEngine(), sleep(6000)]);
+    for (const scene of SCENES) {
+      if (!alive()) return;
+      drawScene(scene); $("pkCap").textContent = scene.say;
+      const shown = sleep(1500);
+      let r;
+      try { r = await readFrame(scene); }
+      catch (e) { worker = null; r = { floor: scene.floor, pillar: scene.pillar, simulated: true }; }
+      if (!alive()) return;
+      readings.push(r);
+      line(`#${readings.length} 층 ${r.floor || "?"} · 기둥 ${r.pillar || "?"}${r.simulated ? " (인식 없이 시연값)" : ""}`, r.floor || r.pillar ? "hit" : "miss");
+      renderEstimate();
+      await shown;
+    }
+    if (!alive()) return;
+
+    setGear("P", 0);
+    line("P단 · 주차 완료");
+    const floor = vote("floor"), pillar = vote("pillar"), found = floor && pillar;
+    const label = spotLabel(floor, pillar), photo = snapshot();
+    setStatus(`📤 ${label} · 휴대폰으로 보내는 중`);
+    await sleep(900);
+    if (!alive()) return;
+    const time = new Date().toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
+    const place = `${route().name.includes("강릉") ? "강릉" : "영월"} 목적지 지하주차장`;
+    $("pkNotiTitle").textContent = found ? "주차 위치를 저장했어요" : "주차 사진을 확인해 주세요";
+    $("pkNotiBody").textContent = `${floor || pillar ? label : "기둥 글자를 읽지 못했어요"} · ${time}`;
+    $("pkLoc").textContent = `${floor || "—"} · ${pillar || "—"}`;
+    $("pkWhere").textContent = `${place} · ${time} 주차`;
+    $("pkImg").src = photo;
+    tickPhone(); $("pkNoti").classList.add("show");
+    if (zoomDisplay) { zoomDisplay = false; fit(); } // 확대 보기에서는 휴대폰이 화면 밖에 있습니다
+    line(`전송: ${floor || "?"} ${pillar || "?"} (읽은 장면 ${readings.length}개, 사진 한 장)`, found ? "hit" : "miss");
+    setStatus(found ? `✅ ${label} · 휴대폰으로 보냈어요` : `⚠ ${label}`);
+    $("pkClose").classList.add("show");
+    render();
+    say(pick(found ? P.parkSaved : P.parkPhoto));
+  }
+
+  function start() {
+    if (S.garage) return;
+    if (S.legIndex < 0) { log("🅿 먼저 출발해 주세요"); return; }
+    clearTimeout(arriveTimer); clearTimeout(legTimer);
+    Object.assign(S, { demo: false, running: false, resting: false, parked: false, restHold: false, waypoint: false, restStop: null, attention: false, restOffered: false, garage: { gear: "D", speed: 8 } });
+    clearSavedEnding();
+    readings = []; rois = [];
+    $("pkLog").innerHTML = ""; $("pkClose").classList.remove("show");
+    $("pkNoti").classList.remove("show"); $("pkDetail").classList.remove("show");
+    $("sign").classList.remove("show"); $("vpick").classList.remove("show");
+    drawBlank("D단 · 글자 인식 꺼짐"); $("pkCap").textContent = "후진(R단)할 때만 글자를 읽습니다";
+    renderEstimate(); tickPhone();
+    $("pkApp").classList.add("show"); $("pkPhoneWrap").classList.add("show"); view.classList.add("show");
+    camZ = zOf(19); targetZ = zOf(16);
+    if (!viewOn) { viewOn = true; viewLast = 0; requestAnimationFrame(drawView); }
+    loadEngine();
+    render();
+    flow(++run);
+  }
+  function leave() {
+    run++; viewOn = false; cancelFlow();
+    Object.assign(S, { garage: null, parked: true, status: "주차를 마쳤어요" });
+    $("pkApp").classList.remove("show"); $("pkPhoneWrap").classList.remove("show"); view.classList.remove("show");
+    render();
+  }
+  $("pkClose").onclick = leave;
+  $("pkNoti").onclick = () => $("pkDetail").classList.add("show");
+  $("pkFound").onclick = () => { $("pkDetail").classList.remove("show"); $("pkNoti").classList.remove("show"); };
+  $("parkBtn").onclick = start;
+  return { start, leave, loadEngine };
+})();
+
+setInterval(() => {
+  tick();
+  if (S.running && !S.busy && !S.resting) {
+    const st = stage(); const gap = S.waypoint ? pace.rest : st === "COMPANION" ? pace.companion : pace.wake;
+    if (restPending(st) || endingDue() || performance.now() - S.lastEnd >= gap) playNext();
+  }
+}, 1000);
+if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = loadVoices;
+window.addEventListener("resize", fit);
+RouteMap = makeRouteMap(); // 지도 (층을 쌓아 그림, 초당 약 30번 갱신)
+$("recVoiceSelect").innerHTML = [...VOICES, SYSTEM_VOICE].map(v => `<option value="${v.id}">${v.name}${v.clips ? ` (${v.clips}문장)` : ""}</option>`).join("");
+S.voice = [...VOICES, SYSTEM_VOICE].some(v => v.id === savedVoice()) ? savedVoice() : (VOICES[0] ? VOICES[0].id : "SYSTEM");
+$("recVoiceSelect").value = S.voice; $("startVoice").textContent = `지금 목소리: ${voiceName(S.voice)}`;
+loadVoices(); fit(); tick(); render();
+log(`이야기 ${STORIES.length}편을 불러왔어요.`);
+</script>
+</body>
+</html>

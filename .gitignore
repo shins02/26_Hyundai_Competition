@@ -1,0 +1,17 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+simulator/index.html
+tools/voice/.venv/
+tools/voice/model/
+tools/voice/samples/
+simulator/.embed_cache/
+.kotlin/
+.DS_Store
+node_modules/
+# 빌드해서 만드는 파일 (parking-demo/build.command로 다시 만듭니다)
+parking-demo/주차메모.app/
+# 용량이 큰 영상은 저장소 대신 유튜브 링크로 냅니다 (GitHub 파일 한도 100MB)
+*.mp4

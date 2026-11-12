@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 주행 중 화면 원칙: 1~2초 안에 읽히는 정보만, 큰 버튼, 애니메이션·긴 글 없음 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:orientation="horizontal"
+    android:padding="24dp">
+
+    <!-- 왼쪽: 주행 중에도 보이는 메인 영역 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="2"
+        android:orientation="vertical">
+
+        <!-- 상단: 단계 · 지역 · 연속 운전 시간 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/stagePill"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/pill"
+                android:paddingHorizontal="20dp"
+                android:paddingVertical="8dp"
+                android:text="🟢 길동무"
+                android:textColor="@color/text"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/regionText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="20dp"
+                android:layout_weight="1"
+                android:text="📍 위치 확인 중"
+                android:textColor="@color/text"
+                android:textSize="24sp" />
+
+            <TextView
+                android:id="@+id/minutesText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="운전 0분"
+                android:textColor="@color/text_dim"
+                android:textSize="22sp" />
+        </LinearLayout>
+
+        <!-- 가운데: 장르 아이콘 + 한 줄 상태 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="20dp"
+            android:layout_weight="1"
+            android:background="@drawable/card"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:id="@+id/genreEmoji"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="😂"
+                android:textSize="72sp" />
+
+            <TextView
+                android:id="@+id/titleText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="S J Story"
+                android:textColor="@color/text"
+                android:textSize="34sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/statusText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="시작을 누르면 이야기를 들려드려요"
+                android:textColor="@color/text_dim"
+                android:textSize="24sp" />
+        </LinearLayout>
+
+        <!-- 대답 버튼: 질문을 기다릴 때만 보입니다 -->
+        <LinearLayout
+            android:id="@+id/answerRow"
+            android:layout_width="match_parent"
+            android:layout_height="96dp"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <Button
+                android:id="@+id/option1"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/btn_primary"
+                android:textAllCaps="false"
+                android:textColor="@color/text"
+                android:textSize="26sp" />
+
+            <Button
+                android:id="@+id/option2"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/btn_primary"
+                android:textAllCaps="false"
+                android:textColor="@color/text"
+                android:textSize="26sp" />
+        </LinearLayout>
+
+        <!-- 하단: 시작/그만 · 다른 거 · 장르 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="88dp"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/startStop"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.4"
+                android:background="@drawable/btn_primary"
+                android:text="▶ 시작"
+                android:textAllCaps="false"
+                android:textColor="@color/text"
+                android:textSize="24sp" />
+
+            <Button
+                android:id="@+id/skip"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1.2"
+                android:background="@drawable/btn_surface"
+                android:text="⏭ 다른 거"
+                android:textAllCaps="false"
+                android:textColor="@color/text"
+                android:textSize="22sp" />
+
+            <Button
+                android:id="@+id/genreComedy"
+                style="@style/GenreButton"
+                android:text="😂" />
+
+            <Button
+                android:id="@+id/genreSpooky"
+                style="@style/GenreButton"
+                android:text="👻" />
+
+            <Button
+                android:id="@+id/genreThink"
+                style="@style/GenreButton"
+                android:text="🤔" />
+
+            <Button
+                android:id="@+id/genreLocal"
+                style="@style/GenreButton"
+                android:text="🗺️" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 오른쪽: 설정(정차 중에만) · 시연 패널 -->
+    <ScrollView
+        android:id="@+id/sidePanel"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="24dp"
+        android:layout_weight="1"
+        android:background="@drawable/card">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="20dp">
+
+            <TextView
+                android:id="@+id/settingsTitle"
+                style="@style/PanelTitle"
+                android:text="설정 (정차 중에만)" />
+
+            <LinearLayout
+                android:id="@+id/settingsGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/PanelLabel"
+                    android:text="좋아하는 장르" />
+
+                <CheckBox android:id="@+id/prefComedy" style="@style/PanelCheck" android:text="😂 개그" />
+                <CheckBox android:id="@+id/prefSpooky" style="@style/PanelCheck" android:text="👻 오싹한 이야기" />
+                <CheckBox android:id="@+id/prefThink" style="@style/PanelCheck" android:text="🤔 생각하는 이야기" />
+                <CheckBox android:id="@+id/prefLocal" style="@style/PanelCheck" android:text="🗺️ 지역 이야기" />
+
+                <Switch
+                    android:id="@+id/familyMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="가족 모드 (오싹한 이야기 숨김)"
+                    android:textColor="@color/text"
+                    android:textSize="18sp" />
+
+                <Switch
+                    android:id="@+id/restKeepListening"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="휴식 안내 중에도 이야기 이어 듣기 (결말은 10~15km 뒤)"
+                    android:textColor="@color/text"
+                    android:textSize="18sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/drivingNotice"
+                style="@style/PanelLabel"
+                android:text="주행 중에는 설정을 열 수 없어요"
+                android:visibility="gone" />
+
+            <TextView
+                style="@style/PanelTitle"
+                android:layout_marginTop="28dp"
+                android:text="시연 패널" />
+
+            <TextView
+                android:id="@+id/envText"
+                style="@style/PanelLabel"
+                android:text="연동 상태 확인 중" />
+
+            <Button android:id="@+id/demoDrive" style="@style/PanelButton" android:text="🚗 데모 주행 (영동고속도로)" />
+            <Button android:id="@+id/demoMinutes" style="@style/PanelButton" android:text="⏱ 운전 시간 +30분" />
+            <Button android:id="@+id/demoNight" style="@style/PanelButton" android:text="🌙 밤 / 낮 전환" />
+            <Button android:id="@+id/demoRear" style="@style/PanelButton" android:text="👥 뒷좌석 탑승 전환" />
+            <Button android:id="@+id/demoAttention" style="@style/PanelButton" android:text="☕ 차량 졸음 경고 켜기/끄기" />
+            <Button android:id="@+id/demoArrive" style="@style/PanelButton" android:text="🅿 쉼터 도착" />
+            <Button android:id="@+id/demoResume" style="@style/PanelButton" android:text="🚗 다시 출발" />
+            <Button android:id="@+id/demoParking" style="@style/PanelButton" android:text="⏪ 후진 주차 시연" />
+
+            <TextView
+                android:id="@+id/logText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:textColor="@color/text_dim"
+                android:textSize="14sp" />
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>
