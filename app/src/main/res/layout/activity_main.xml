@@ -53,12 +53,24 @@
         </LinearLayout>
 
         <!-- 가운데: 위쪽 넓은 경로 지도 -->
-        <com.gilstory.app.ui.RouteMapView
-            android:id="@+id/routeMap"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_marginTop="16dp"
-            android:layout_weight="1" />
+            android:layout_weight="1">
+
+            <com.gilstory.app.ui.RouteMapView
+                android:id="@+id/routeMap"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <!-- 주차 시연 때만: 지도 대신 가상 주차장 카메라 화면 -->
+            <com.gilstory.app.ui.ParkingCamView
+                android:id="@+id/parkingCam"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+        </FrameLayout>
 
         <!-- 지도 아래 이야기 띠: 장르 아이콘 + 제목 + 상태 -->
         <LinearLayout

@@ -22,26 +22,30 @@ data class ParkingSpot(
 }
 
 /**
- * 후진(R단)할 때 빌트인캠이 읽은 기둥 글자로 주차 위치를 정해, 주차(P단)를 마치면 한 번 알립니다.
+ * 주차하며 빌트인캠이 읽은 기둥 글자로 주차 위치를 정해, 주차(P단)를 마치면 한 번 알립니다.
  *
- * - 후진 중에 읽은 값 중 가장 많이 나온 값을 고릅니다 (같으면 최근 값). 지나친 옆 기둥이나 오독을 거르기 위해서입니다.
- * - 앞뒤로 여러 번 움직여도 P단이 될 때 한 번만 알립니다.
- * - 후진 없이 앞으로 세웠으면 P단에서 한 번만 읽습니다.
- * - 출차하며 후진한 뒤 멀리 달렸다면 그때 읽은 값은 버립니다. 다음 주차 위치로 잘못 보내지 않기 위해서입니다.
- * - 앱을 켰을 때 이미 P단이면 알리지 않습니다.
+ * - 후진(R단)에는 뒤쪽 카메라, 앞으로 갈 때(D단)는 앞쪽 카메라로 읽습니다.
+ *   후진을 2~3번 고쳐 대거나, 앞으로 빼서 다시 대거나, 앞으로 세워도 위치를 정할 수 있습니다.
+ * - P단이 되면 주차 직전 읽은 값 가운데 많이, 그리고 최근에 읽은 값을 고릅니다.
+ *   (오래된 값일수록 덜 셉니다.) 지나친 옆 기둥이나 오독을 거르기 위해서입니다.
+ * - 앞쪽 카메라 값은 P단 직전 [FRONT_WINDOW_MS] 안의 것만 씁니다. 통로를 지나며 본 먼 기둥은 버립니다.
+ * - 뒤쪽 카메라 값은 [STALE_AFTER_MS] 안의 것만 씁니다. 출차하며 후진할 때 읽은 값을
+ *   다음 주차 위치로 잘못 보내지 않기 위해서입니다.
+ * - 쓸 값이 하나도 없으면 P단에서 앞쪽 카메라로 한 번 더 읽습니다.
+ * - 앞뒤로 여러 번 움직여도 P단이 될 때 한 번만 알립니다. 앱을 켰을 때 이미 P단이면 알리지 않습니다.
  */
 class ParkingLocator(
     private val camera: SignCamera,
     private val notifier: ParkingNotifier,
     private val nowMs: () -> Long,
 ) {
+    private class Reading(val frame: SignFrame, val facing: CamFacing, val atMs: Long)
+
     private var gear: DriveGear? = null
     private var movedSinceParked = false
-    private var reversed = false
-    private var sampling = false
-    private var leftReverseAtMs: Long? = null
+    private var sampling: CamFacing? = null
     private var readToken = 0
-    private val readings = ArrayDeque<SignFrame>()
+    private val readings = ArrayDeque<Reading>()
 
     fun onGear(next: DriveGear) {
         if (next == gear) return
@@ -50,20 +54,16 @@ class ParkingLocator(
         if (!camera.available) return
         when (next) {
             DriveGear.REVERSE -> {
-                dropIfStale()
                 movedSinceParked = true
-                reversed = true
-                startSampling()
+                startSampling(CamFacing.REAR)
             }
             DriveGear.OTHER -> {
-                stopSampling()
-                if (before == DriveGear.PARK) clearTrip()
-                if (before == DriveGear.REVERSE) leftReverseAtMs = nowMs()
+                if (before == DriveGear.PARK) readings.clear()
                 movedSinceParked = true
+                startSampling(CamFacing.FRONT)
             }
             DriveGear.PARK -> {
                 stopSampling()
-                dropIfStale()
                 if (movedSinceParked) finishParking()
             }
         }
@@ -72,74 +72,78 @@ class ParkingLocator(
     fun release() {
         stopSampling()
         readToken += 1
-        clearTrip()
+        readings.clear()
     }
 
-    private fun startSampling() {
-        if (sampling) return
-        sampling = true
-        camera.start(::onFrame)
+    private fun startSampling(facing: CamFacing) {
+        if (sampling == facing) return
+        stopSampling()
+        sampling = facing
+        camera.start(facing, ::onFrame)
     }
 
     private fun stopSampling() {
-        if (!sampling) return
-        sampling = false
+        if (sampling == null) return
+        sampling = null
         camera.stop()
     }
 
     private fun onFrame(frame: SignFrame) {
-        if (sampling) remember(frame)
+        val facing = sampling ?: return
+        remember(Reading(frame, facing, nowMs()))
     }
 
-    private fun remember(frame: SignFrame) {
-        readings.addLast(frame)
+    private fun remember(reading: Reading) {
+        readings.addLast(reading)
         while (readings.size > MAX_READINGS) readings.removeFirst()
-    }
-
-    private fun dropIfStale() {
-        val left = leftReverseAtMs ?: return
-        if (nowMs() - left > STALE_AFTER_MS) clearTrip()
-    }
-
-    private fun clearTrip() {
-        readings.clear()
-        reversed = false
-        leftReverseAtMs = null
     }
 
     private fun finishParking() {
         movedSinceParked = false
-        if (reversed) {
-            send()
+        val now = nowMs()
+        val recent = readings.filter {
+            now - it.atMs <= if (it.facing == CamFacing.FRONT) FRONT_WINDOW_MS else STALE_AFTER_MS
+        }
+        if (recent.isNotEmpty()) {
+            send(recent, now)
             return
         }
         val token = ++readToken
         camera.readOnce { frame ->
-            if (token == readToken && gear == DriveGear.PARK) {
-                frame?.let(::remember)
-                send()
-            }
+            if (token == readToken && gear == DriveGear.PARK) send(listOfNotNull(frame?.let { Reading(it, CamFacing.FRONT, nowMs()) }), nowMs())
         }
     }
 
-    private fun send() {
-        val parsed = readings.map { it to ParkingSignParser.parse(it.text) }
-        val floor = mostCommon(parsed.mapNotNull { it.second.floor })
-        val pillar = mostCommon(parsed.mapNotNull { it.second.pillar })
-        val photo = parsed.lastOrNull { pillar != null && it.second.pillar == pillar }?.first?.photoUri
-            ?: readings.lastOrNull()?.photoUri
-        clearTrip()
+    private fun send(used: List<Reading>, now: Long) {
+        val parsed = used.map { it to ParkingSignParser.parse(it.frame.text) }
+        val floor = best(parsed.mapNotNull { (r, s) -> s.floor?.let { it to r.atMs } }, now)
+        val pillar = best(parsed.mapNotNull { (r, s) -> s.pillar?.let { it to r.atMs } }, now)
+        // 알림 사진: 고른 기둥이 찍힌 마지막 사진, 없으면 마지막 사진
+        val photo = parsed.lastOrNull { pillar != null && it.second.pillar == pillar && it.first.frame.photoUri != null }?.first?.frame?.photoUri
+            ?: used.lastOrNull { it.frame.photoUri != null }?.frame?.photoUri
+        readings.clear()
         notifier.notify(ParkingSpot(floor, pillar, photo))
     }
 
-    private fun mostCommon(values: List<String>): String? {
-        val counts = values.groupingBy { it }.eachCount()
-        return values.lastOrNull { counts[it] == counts.values.maxOrNull() }
+    /** 읽은 횟수에 최근일수록 큰 무게를 줘서 고릅니다. 같으면 마지막에 읽은 값 */
+    private fun best(values: List<Pair<String, Long>>, now: Long): String? {
+        if (values.isEmpty()) return null
+        val score = HashMap<String, Double>()
+        for ((value, at) in values) {
+            score[value] = (score[value] ?: 0.0) + Math.pow(0.5, (now - at).toDouble() / HALF_LIFE_MS)
+        }
+        val top = score.values.max()
+        return values.last { score[it.first]!! >= top - 1e-9 }.first
     }
 
     companion object {
-        const val MAX_READINGS = 40
+        const val MAX_READINGS = 60
+        /** 뒤쪽 카메라 값을 쓰는 기간 (출차 때 읽은 값 거르기) */
         const val STALE_AFTER_MS = 90_000L
+        /** 앞쪽 카메라 값을 쓰는 기간: P단 직전 */
+        const val FRONT_WINDOW_MS = 20_000L
+        /** 이만큼 지난 값은 절반만 셉니다 */
+        const val HALF_LIFE_MS = 10_000.0
     }
 }
 

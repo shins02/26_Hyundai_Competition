@@ -5,6 +5,7 @@ import android.os.Handler
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import com.gilstory.app.core.AnswerListener
+import com.gilstory.app.core.CamFacing
 import com.gilstory.app.core.SignCamera
 import com.gilstory.app.core.SignFrame
 import com.gilstory.app.core.Speaker
@@ -16,7 +17,7 @@ import java.util.Locale
  */
 object NoSignCamera : SignCamera {
     override val available = false
-    override fun start(onFrame: (SignFrame) -> Unit) = Unit
+    override fun start(facing: CamFacing, onFrame: (SignFrame) -> Unit) = Unit
     override fun stop() = Unit
     override fun readOnce(onResult: (SignFrame?) -> Unit) = onResult(null)
 }

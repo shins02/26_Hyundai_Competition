@@ -16,6 +16,7 @@ import com.gilstory.app.R
 import com.gilstory.app.core.Answer
 import com.gilstory.app.core.AnswerInputPolicy
 import com.gilstory.app.core.Clock
+import com.gilstory.app.core.CamFacing
 import com.gilstory.app.core.DriveGear
 import com.gilstory.app.core.Genre
 import com.gilstory.app.core.ParkingLocator
@@ -100,6 +101,7 @@ class MainActivity : Activity() {
     private var demoNight = false
     private var rearOccupied = false
     private var attentionOn = false
+    private var parkedSinceMs = 0L // 정차를 시작한 때 (졸음 경고를 끌 만큼 쉬었는지 봅니다)
     private var vehicleMinutes = 0
     // 차량이 주행 시간을 주지 않으면(에뮬레이터 등) 앱이 P단이 아닌 시간을 직접 셉니다
     private var ownDrivingClock = false
@@ -111,6 +113,9 @@ class MainActivity : Activity() {
     private var parkingSpot: ParkingSpot? = null
     private var parkingStep: String? = null
     private var parkingShownAtMs = 0L
+    private lateinit var parkingCam: ParkingCamView
+    private var parkingCamOn = false    // 주차 시연 중: 지도 자리에 가상 주차장 카메라
+    private var parkingCamHidden = false // 카메라 화면을 눌러 지도로 바꿨을 때
     // 시연 버튼·음성 인식 결과를 이야기 띠에 잠깐 보여 줍니다
     private var notice: String? = null
     private var noticeAtMs = 0L
@@ -131,6 +136,7 @@ class MainActivity : Activity() {
             }
             if (parkingSpot != null && SystemClock.elapsedRealtime() - parkingShownAtMs > PARKING_SHOW_MS) {
                 parkingSpot = null
+                parkingCamOn = false
                 render(session.view())
             }
             session.onTick()
@@ -180,7 +186,7 @@ class MainActivity : Activity() {
                 val pos = routeMap.plannedPosition
                 // 쉼터에 들어가 있는 동안에는 차를 멈추고, 다시 출발하면 그 자리에서 이어서 갑니다.
                 // 남은 시간 안에 이번 구간 끝에 닿도록 조금씩 나아갑니다.
-                if (!parked && to > pos) routeMap.moveAlongPlanned(pos + (to - pos) * (500.0 / left).coerceAtMost(1.0))
+                if (!parked && !demo.isPaused && to > pos) routeMap.moveAlongPlanned(pos + (to - pos) * (500.0 / left).coerceAtMost(1.0))
                 updateMap(session.view())
                 main.postDelayed(this, 500)
             }
@@ -204,11 +210,16 @@ class MainActivity : Activity() {
         setUpMap()
         session = newSession(demoTiming = false)
         parkingLocator = ParkingLocator(NoSignCamera, parkingNotifier) { SystemClock.elapsedRealtime() }
-        parkingDemo = ParkingDemo(main, demoParkingNotifier) { step ->
+        parkingDemo = ParkingDemo(main, demoParkingNotifier, onStep = { step ->
             addLog(step)
             parkingStep = step.replace("[시연] ", "")
             render(session.view())
-        }
+        }, scene = object : ParkingDemo.Scene {
+            override fun aisle() = parkingCam.startAisle()
+            override fun reverse(durationMs: Long, final: Boolean) = parkingCam.startReverse(durationMs, final)
+            override fun forward(durationMs: Long) = parkingCam.startForward(durationMs)
+            override fun read(text: String, facing: CamFacing) = parkingCam.showRead(text, facing)
+        })
         setEnv("빌트인캠", if (NoSignCamera.available) "연결됨" else "영상 API 없음 (시연만)")
 
         setParked(false, known = false)
@@ -319,6 +330,9 @@ class MainActivity : Activity() {
     /** 주차 위치를 화면 가운데에 크게 띄우고 소리로도 알려 줍니다. */
     private fun showParking(spot: ParkingSpot, demo: Boolean) {
         Log.i(TAG, "주차 위치: ${spot.summary()}")
+        // 시연 주차가 P단으로 끝났으면 차도 정차 상태로 바꿉니다 (설정 열림, 다시 출발로 이어 가기)
+        if (demo && !parked) setParked(true)
+        if (demo) parkingCam.finish(spot.summary())
         addLog("📲 주차 위치 알림: ${spot.summary()}")
         // 시연에서는 듣던 이야기를 멈추고 주차 안내를 들려줍니다. 실제 주차 중 이야기는 끊지 않습니다.
         if (demo && session.view().running) session.stop()
@@ -422,7 +436,17 @@ class MainActivity : Activity() {
         routeMap.setRestPins(StoryRepository.loadRestStops(this).mapNotNull { p ->
             if (p.latitude != null && p.longitude != null) RouteMapView.Pin(p.name, GeoPoint(p.latitude, p.longitude)) else null
         })
+        // 주차 시연 중에는 카메라 화면과 지도를 눌러서 바꿉니다
+        parkingCam.setOnClickListener {
+            parkingCamHidden = true
+            render(session.view())
+        }
         routeMap.setOnClickListener {
+            if (parkingCamOn && parkingCamHidden) {
+                parkingCamHidden = false
+                render(session.view())
+                return@setOnClickListener
+            }
             mapOverride = if (routeMap.mode == RouteMapView.Mode.NAV) RouteMapView.Mode.OVERVIEW else RouteMapView.Mode.NAV
             updateMap(session.view())
         }
@@ -467,18 +491,25 @@ class MainActivity : Activity() {
 
         // 주행 화면(네비 모드): 달리는 중이면 기본으로 켭니다. 지도를 누르면 전체 경로와 바꿉니다
         val driving = !parked && (demo.isRunning || routeMap.hasRoute)
-        routeMap.mode = mapOverride ?: if (driving) RouteMapView.Mode.NAV else RouteMapView.Mode.OVERVIEW
+        // 주차 중에는 차가 선 자리를 가까이 보여 줍니다
+        val parking = parkingStep != null || parkingSpot != null
+        val closeUp = driving || (parking && (demo.isRunning || routeMap.hasRoute))
+        routeMap.mode = mapOverride ?: if (closeUp) RouteMapView.Mode.NAV else RouteMapView.Mode.OVERVIEW
 
         // 위쪽 안내 띠
         val turn = realTurn
+        val spot = parkingSpot
         routeMap.banner = when {
+            spot != null -> RouteMapView.Banner("P", "주차 위치 · ${spot.summary()}", "주차")
+            parkingStep != null -> RouteMapView.Banner("⏪", "주차 중 · 차가 멈췄어요", "R·D")
             rest != null && rest == addedRest -> RouteMapView.Banner("P", "경유지 · $rest", next?.takeIf { it.name == rest }?.let { km(it.distanceKm) } ?: "경유")
             rest != null -> RouteMapView.Banner("P", "쉬어 갈 곳 · $rest", next?.takeIf { it.name == rest }?.let { km(it.distanceKm) } ?: "앞쪽")
             !demo.isRunning && turn != null -> RouteMapView.Banner(turnIcon(turn.first), turn.third.ifBlank { "길 안내" }, km(turn.second / 1000.0))
             next != null -> RouteMapView.Banner("P", "다음 쉼터 · ${next.name}", km(next.distanceKm))
             else -> RouteMapView.Banner("↑", if (demo.isRunning) "영동고속도로 따라 직진" else "길 안내 대기", "")
         }
-        routeMap.roadName = if (demo.isRunning) "영동고속도로" else ""
+        routeMap.roadName = if (demo.isRunning && !parking) "영동고속도로" else ""
+        if (parking) routeMap.title = "🅿 주차장 · ${region ?: "현재 위치"}"
 
         // 아래 띠: 남은 거리 · 도착 예정
         val remain = when {
@@ -530,12 +561,44 @@ class MainActivity : Activity() {
     }
 
     private fun setParked(value: Boolean, known: Boolean = true) {
+        val wasParked = parked
+        val now = SystemClock.elapsedRealtime()
+        if (value && !wasParked) parkedSinceMs = now
+        // 졸음 경고: 휴게소·경유지에서 3분 넘게 쉬었다가 출발하면 꺼지고, 그보다 일찍 출발하면 그대로 둡니다
+        val warningNote = if (!value && wasParked && known && attentionOn && parkedSinceMs > 0L) {
+            val rested = now - parkedSinceMs
+            if (rested >= REST_CLEARS_WARNING_MS) {
+                attentionOn = false
+                session.onDriverAttention(false)
+                "☕ ${rested / 60_000}분 쉬었어요 · 졸음 경고를 껐어요"
+            } else {
+                val left = (REST_CLEARS_WARNING_MS - rested + 999) / 1000
+                "☕ 쉰 시간이 3분이 안 돼요 · 졸음 경고는 켜진 채로 출발해요 (${left / 60}분 ${left % 60}초 더 쉬면 꺼져요)"
+            }
+        } else null
+        if (!value) parkedSinceMs = 0L
         parked = value
+        // 시연 주행: 서 있는 동안 차와 구간 시간을 멈추고, 다시 출발하면 그 자리에서 이어 갑니다
+        if (value) holdDemoCar() else releaseDemoCar()
         settingsGroup.visibility = if (parked) View.VISIBLE else View.GONE
         drivingNotice.visibility = if (parked) View.GONE else View.VISIBLE
         // 쉼터에서 P단 → 주행 기어로 바뀌면 다시 출발
         session.onParked(parked, known)
         render(session.view())
+        warningNote?.let(::demoStep)
+        if (value && !wasParked && attentionOn) demoStep("☕ 졸음 경고가 켜져 있어요 · 3분 넘게 쉬고 출발하면 꺼져요")
+    }
+
+    private fun holdDemoCar() {
+        if (!demo.isRunning) return
+        if (pausedAtMs == 0L) pausedAtMs = SystemClock.elapsedRealtime()
+        demo.pause()
+    }
+
+    private fun releaseDemoCar() {
+        if (pausedAtMs > 0L) demoLegStartMs += SystemClock.elapsedRealtime() - pausedAtMs
+        pausedAtMs = 0L
+        demo.resume()
     }
 
     private fun restStoryMode() =
@@ -588,6 +651,7 @@ class MainActivity : Activity() {
         logText = findViewById(R.id.logText)
         demoDriveButton = findViewById(R.id.demoDrive)
         routeMap = findViewById(R.id.routeMap)
+        parkingCam = findViewById(R.id.parkingCam)
     }
 
     private fun wireButtons() {
@@ -626,6 +690,11 @@ class MainActivity : Activity() {
             demoMinutes = 0
             extraMinutes = 0
             session = newSession(demoTiming = true)
+            parkingDemo.stop()
+            parkingStep = null
+            parkingSpot = null
+            parkingCamOn = false
+            pausedAtMs = 0L
             setParked(false)
             demoLeg = -1
             addedRest = null
@@ -639,7 +708,16 @@ class MainActivity : Activity() {
             demoDriveButton.text = "■ 데모 주행 멈추기"
             addLog("🚗 데모 주행 시작: 영동고속도로 서울 → 강릉")
         }
-        findViewById<Button>(R.id.demoParking).setOnClickListener { parkingDemo.start() }
+        findViewById<Button>(R.id.demoParking).setOnClickListener {
+            // 주차장에 들어왔으니 시연 주행의 차도 그 자리에 세웁니다 (지도가 더 나아가지 않게)
+            holdDemoCar()
+            mapOverride = null
+            parkingSpot = null
+            parkingCamOn = true
+            parkingCamHidden = false
+            parkingDemo.start()
+            render(session.view())
+        }
         findViewById<Button>(R.id.demoMinutes).setOnClickListener {
             extraMinutes += 30
             demoStep("⏱ 운전 시간 +30분 (총 ${totalMinutes()}분)")
@@ -664,18 +742,17 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.demoArrive).setOnClickListener {
             if (parked) { demoStep("🅿 이미 정차 중이에요"); return@setOnClickListener }
             demoStep("🅿 쉼터 도착 · P단 (시연)")
-            pausedAtMs = SystemClock.elapsedRealtime()
             setParked(true)
             session.onWaypointArrived()
         }
         findViewById<Button>(R.id.demoResume).setOnClickListener {
             if (!parked) { demoStep("🚗 이미 달리는 중이에요 · 정차하려면 🅿 쉼터 도착"); return@setOnClickListener }
             demoStep("🚗 다시 출발 · D단 (시연)")
-            attentionOn = false
-            session.onDriverAttention(false)
-            // 시연 주행: 쉬는 동안 멈췄던 차가 그 자리에서 이어서 달립니다
-            if (pausedAtMs > 0) demoLegStartMs += SystemClock.elapsedRealtime() - pausedAtMs
-            pausedAtMs = 0L
+            // 주차장을 빠져나가면 주차 안내와 카메라 화면은 내립니다
+            parkingDemo.stop()
+            parkingStep = null
+            parkingSpot = null
+            parkingCamOn = false
             mapOverride = null
             setParked(false)
             if (demo.isRunning) { main.removeCallbacks(mapTicker); main.post(mapTicker) }
@@ -694,6 +771,13 @@ class MainActivity : Activity() {
     }
 
     private fun render(v: SessionView) {
+        if (::parkingCam.isInitialized) {
+            val camVisible = parkingCamOn && !parkingCamHidden
+            if ((parkingCam.visibility == View.VISIBLE) != camVisible) {
+                parkingCam.visibility = if (camVisible) View.VISIBLE else View.GONE
+                if (camVisible) parkingCam.invalidate()
+            }
+        }
         if (!v.running && focusRequested) {
             focusRequested = false
             audioManager.abandonAudioFocusRequest(focusRequest)
@@ -739,7 +823,7 @@ class MainActivity : Activity() {
             statusText.text = if (spot.complete) "주차 위치를 기억했어요 · 휴대폰 알림 예정" else "주차 위치를 확인해 주세요"
         } else if (step != null) {
             genreEmoji.text = "⏪"
-            titleText.text = "후진 주차 중"
+            titleText.text = "주차 중 · 기둥 글자 읽는 중"
             statusText.text = step
         }
     }
@@ -770,6 +854,8 @@ class MainActivity : Activity() {
     companion object {
         private const val TICK_MS = 2_000L
         private const val PARKING_SHOW_MS = 60_000L
+        /** 이만큼 쉬고 출발하면 졸음 경고를 끕니다 */
+        private const val REST_CLEARS_WARNING_MS = 3 * 60_000L
         private const val NOTICE_MS = 5_000L
         private const val DEMO_KMH = 95.0 // 시연 남은 시간 계산용 평균 속도
         private const val TAG = "Gilstory"

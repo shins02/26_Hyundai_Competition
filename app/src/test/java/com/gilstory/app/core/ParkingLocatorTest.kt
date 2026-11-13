@@ -12,9 +12,11 @@ class ParkingLocatorTest {
         var onFrame: ((SignFrame) -> Unit)? = null
         var onceCallback: ((SignFrame?) -> Unit)? = null
         var startCount = 0
+        var facing: CamFacing? = null
 
-        override fun start(onFrame: (SignFrame) -> Unit) {
+        override fun start(facing: CamFacing, onFrame: (SignFrame) -> Unit) {
             startCount += 1
+            this.facing = facing
             this.onFrame = onFrame
         }
 
@@ -79,11 +81,55 @@ class ParkingLocatorTest {
     }
 
     @Test
-    fun `R단이 아닐 때 들어온 글자는 쓰지 않는다`() {
+    fun `후진은 뒤쪽, 앞으로 갈 때는 앞쪽 카메라로 읽는다`() {
+        locator.onGear(DriveGear.OTHER)
+        assertEquals(CamFacing.FRONT, camera.facing)
         locator.onGear(DriveGear.REVERSE)
-        camera.see("B2 C-17")
+        assertEquals(CamFacing.REAR, camera.facing)
+        locator.onGear(DriveGear.OTHER)
+        assertEquals(CamFacing.FRONT, camera.facing)
+    }
+
+    @Test
+    fun `후진을 여러 번 고쳐 대도 마지막 자리 기둥을 고른다`() {
+        locator.onGear(DriveGear.OTHER)
+        locator.onGear(DriveGear.REVERSE)
+        camera.see("B2 C-16", "a")
+        camera.see("B2 C-16", "b")
+        now += 6_000
+        locator.onGear(DriveGear.OTHER) // 앞으로 빼서 고쳐 대기
+        camera.see("B2 C-17", "c")
+        now += 6_000
+        locator.onGear(DriveGear.REVERSE)
+        camera.see("B2 C-17", "d")
+        now += 3_000
+        locator.onGear(DriveGear.PARK)
+
+        assertEquals(listOf(ParkingSpot("B2", "C-17", "d")), notifier.spots)
+        assertNull(camera.onceCallback)
+    }
+
+    @Test
+    fun `앞으로 주차하면 주차 직전 앞쪽 카메라 글자로 정한다`() {
+        locator.onGear(DriveGear.OTHER)
+        camera.see("B2 C-15") // 통로를 지나며 본 기둥
+        now += 8_000
+        camera.see("B2 C-17", "f")
+        camera.see("C-17")
+        now += 2_000
+        locator.onGear(DriveGear.PARK)
+
+        assertEquals(ParkingSpot("B2", "C-17", "f"), notifier.spots.single())
+        assertNull(camera.onceCallback)
+    }
+
+    @Test
+    fun `오래전에 앞쪽 카메라로 본 글자는 쓰지 않는다`() {
         locator.onGear(DriveGear.OTHER)
         camera.see("B9 H-99")
+        now += ParkingLocator.FRONT_WINDOW_MS + 1
+        locator.onGear(DriveGear.REVERSE)
+        camera.see("B2 C-17")
         locator.onGear(DriveGear.PARK)
 
         assertEquals(ParkingSpot("B2", "C-17"), notifier.spots.single())

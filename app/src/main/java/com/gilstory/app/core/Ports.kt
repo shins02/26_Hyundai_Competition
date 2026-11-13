@@ -34,11 +34,16 @@ interface RestNavigator {
 /** 빌트인캠 한 장면에서 읽은 글자와, 알림에 붙일 표지 주변 사진 */
 data class SignFrame(val text: String, val photoUri: String? = null)
 
+/** 빌트인캠의 앞쪽·뒤쪽 카메라 */
+enum class CamFacing { FRONT, REAR }
+
 /** 빌트인캠에서 기둥 글자를 읽습니다. 영상은 차 안에서만 처리합니다. */
 interface SignCamera {
     val available: Boolean
-    fun start(onFrame: (SignFrame) -> Unit)
+    /** [facing] 카메라로 글자를 계속 읽습니다. 다른 쪽으로 바꿀 때는 stop 뒤에 다시 부릅니다 */
+    fun start(facing: CamFacing, onFrame: (SignFrame) -> Unit)
     fun stop()
+    /** 주차를 마친 뒤 앞쪽 카메라로 한 장만 읽습니다 */
     fun readOnce(onResult: (SignFrame?) -> Unit)
 }
 

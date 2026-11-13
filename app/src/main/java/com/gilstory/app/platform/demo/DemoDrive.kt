@@ -1,6 +1,7 @@
 package com.gilstory.app.platform.demo
 
 import android.os.Handler
+import android.os.SystemClock
 import com.gilstory.app.core.RestNavigator
 import com.gilstory.app.core.RestStop
 
@@ -38,8 +39,16 @@ class DemoDrive(
     private var index = -1
     private var running = false
     private var legMs = DEFAULT_LEG_MS
+    private var nextStepAtMs = 0L
+    private var arriveAtMs = 0L
+    // 멈춘 동안 남아 있던 시간 (다음 구간까지, 쉼터 도착까지)
+    private var pausedStepLeftMs: Long? = null
+    private var pausedArriveLeftMs: Long? = null
 
     val isRunning get() = running
+
+    /** 쉼터·주차로 차가 서 있는 동안: 구간이 넘어가지 않습니다 */
+    val isPaused get() = pausedStepLeftMs != null
 
     /** 지도용: 시연 구간 순서대로의 시·군 이름과, 한 구간 길이 */
     val regions: List<String> get() = legs.map { it.region }
@@ -57,11 +66,15 @@ class DemoDrive(
             val leg = legs[index]
             sink.onDemoMinutes(leg.minutes)
             sink.onDemoRegion(leg.region)
+            nextStepAtMs = now() + legMs
             main.postDelayed(this, legMs)
         }
     }
 
-    private val arrive = Runnable { sink.onDemoArrived() }
+    private val arrive = Runnable {
+        arriveAtMs = 0L
+        sink.onDemoArrived()
+    }
 
     fun start(legDurationMs: Long = DEFAULT_LEG_MS) {
         stop()
@@ -73,9 +86,40 @@ class DemoDrive(
 
     fun stop() {
         running = false
+        pausedStepLeftMs = null
+        pausedArriveLeftMs = null
+        arriveAtMs = 0L
         main.removeCallbacks(step)
         main.removeCallbacks(arrive)
     }
+
+    /** 차가 섰습니다(쉼터 도착·주차). 다시 출발할 때까지 시간을 멈춥니다. */
+    fun pause() {
+        if (!running || isPaused) return
+        val now = now()
+        pausedStepLeftMs = (nextStepAtMs - now).coerceAtLeast(0L)
+        pausedArriveLeftMs = if (arriveAtMs > 0L) (arriveAtMs - now).coerceAtLeast(0L) else null
+        main.removeCallbacks(step)
+        main.removeCallbacks(arrive)
+    }
+
+    /** 다시 출발: 멈췄던 자리에서 남은 시간만큼 이어 갑니다. */
+    fun resume() {
+        val stepLeft = pausedStepLeftMs ?: return
+        val arriveLeft = pausedArriveLeftMs
+        pausedStepLeftMs = null
+        pausedArriveLeftMs = null
+        if (!running) return
+        val now = now()
+        nextStepAtMs = now + stepLeft
+        main.postDelayed(step, stepLeft)
+        if (arriveLeft != null) {
+            arriveAtMs = now + arriveLeft
+            main.postDelayed(arrive, arriveLeft)
+        }
+    }
+
+    private fun now() = SystemClock.uptimeMillis()
 
     override fun nextRestStop(): RestStop? {
         val leg = legs.getOrNull(index.coerceAtLeast(0)) ?: return null
@@ -86,7 +130,12 @@ class DemoDrive(
         onResult(true)
         // 시연: 경유지 추가 후 잠시 뒤 쉼터에 도착
         main.removeCallbacks(arrive)
-        main.postDelayed(arrive, ARRIVE_MS)
+        if (isPaused) {
+            pausedArriveLeftMs = ARRIVE_MS
+        } else {
+            arriveAtMs = now() + ARRIVE_MS
+            main.postDelayed(arrive, ARRIVE_MS)
+        }
     }
 
     companion object {
